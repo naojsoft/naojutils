@@ -3,7 +3,7 @@
 #
 import os
 import re
-import Bunch
+from ginga.misc import Bunch
 
 
 frame_regex1 = re.compile('^(\w{3})([AaQq])(\d{8})$')
