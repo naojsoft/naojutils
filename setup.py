@@ -12,7 +12,7 @@ srcdir = os.path.dirname(__file__)
 from distutils.command.build_py import build_py
 
 def read(fname):
-    buf = open(os.path.join(srcdir, fname), 'r').read()
+    buf = open(os.path.join(srcdir, fname), 'rt').read()
     return buf
 
 setup(
@@ -23,9 +23,9 @@ setup(
     description = ("Misc python modules for working with Subaru Telescope instrument data."),
     long_description = read('README.txt'),
     license = "BSD",
-    keywords = "naoj, subaru, telescope, instrument, data",
+    keywords = "NAOJ, subaru, telescope, instrument, data",
     url = "http://naojsoft.github.com/naojutils",
-    packages = ['naoj', ],
+    packages = ['naoj', 'naoj.cmap', 'naoj.spcam', 'naoj.hsc'],
     package_data = { },
     scripts = [],
     classifiers = [
