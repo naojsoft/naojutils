@@ -1,5 +1,5 @@
 #
-# the "Jon Tonley" colormap used by ZView
+# the "John Tonry" colormap used by ZView
 #
 cmap_jt = (
     (0.0, 0.0, 0.0),

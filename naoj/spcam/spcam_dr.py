@@ -83,6 +83,21 @@ class SuprimeCamDR(object):
         exp_num = (frame.number // self.num_frames) * self.num_frames
         return exp_num
 
+    def exp_num_to_file_list(self, directory, exp_num):
+        frame = Frame()
+        frame.directory = directory
+        frame.inscode = self.inscode
+        frame.frametype = 'A'
+        frame.prefix = 0
+        frame.number = 0
+
+        nums = map(lambda off: exp_num+off, self.frameid_offsets)
+        res = []
+        for num in nums:
+            frame.number = num
+            res.append(os.path.join(directory, str(frame)+'.fits'))
+        return res
+
     def get_file_list(self, path):
         frame = Frame(path)
         exp_num = self.get_exp_num(path)
@@ -149,7 +164,7 @@ class SuprimeCamDR(object):
         return d
 
 
-    def subtract_overscan_np(self, data_np, d, header=None):
+    def subtract_overscan_np(self, data_np, d, sub_bias=True, header=None):
         """Subtract the median bias calculated from the overscan regions
         from a SPCAM image data array.  The resulting image is trimmed to
         remove the overscan regions.
@@ -184,29 +199,34 @@ class SuprimeCamDR(object):
             #print "processing channel %d" % (channel)
             ch = d[channel]
 
-            # get median of each row in overscan area for this channel
-            ovsc_median = numpy.median(data_np[ch.efminy:ch.efmaxy+1,
-                                               ch.osminx:ch.osmaxx+1], axis=1)
             # calculate size of effective pixels area for this channel
             efwd = ch.efmaxx + 1 - ch.efminx
             efht = ch.efmaxy + 1 - ch.efminy
-            len_ovsc = ovsc_median.shape[0]
-
-            assert len_ovsc == efht, \
-                   ValueError("median array len (%d) doesn't match effective pixel len (%d)" % (
-                len_ovsc, efht))
-
-            ovsc_median = ovsc_median.reshape((efht, 1))
-            ovsc_median = numpy.repeat(ovsc_median, efwd, axis=1)
 
             j = ch.startposx
 
             # Cut effective pixel region into output array
             xlo, xhi, ylo, yhi = j, j + efwd, 0, efht
-            out[ylo:yhi, xlo:xhi] = data_np[ch.efminy:ch.efmaxy+1,
-                                            ch.efminx:ch.efmaxx+1] - ovsc_median
-            # Subtract overscan medians
-            #out[ylo:yhi, xlo:xhi] -= ovsc_median
+
+            if sub_bias:
+                # get median of each row in overscan area for this channel
+                ovsc_median = numpy.median(data_np[ch.efminy:ch.efmaxy+1,
+                                                   ch.osminx:ch.osmaxx+1],
+                                           axis=1)
+                len_ovsc = ovsc_median.shape[0]
+
+                assert len_ovsc == efht, \
+                       ValueError("median array len (%d) doesn't match effective pixel len (%d)" % (
+                    len_ovsc, efht))
+
+                ovsc_median = ovsc_median.reshape((efht, 1))
+                ovsc_median = numpy.repeat(ovsc_median, efwd, axis=1)
+
+                out[ylo:yhi, xlo:xhi] = data_np[ch.efminy:ch.efmaxy+1,
+                                                ch.efminx:ch.efmaxx+1] - ovsc_median
+            else:
+                out[ylo:yhi, xlo:xhi] = data_np[ch.efminy:ch.efmaxy+1,
+                                                ch.efminx:ch.efmaxx+1]
 
             # Update header for effective regions
             if header is not None:
@@ -382,10 +402,11 @@ class SuprimeCamDR(object):
         # TODO: fill in interesting/select object headers from seed image
         return img_mosaic
 
-    def remove_overscan(self, img):
+    def remove_overscan(self, img, sub_bias=True):
         d = self.get_regions(img)
         header = {}
         new_data_np = self.subtract_overscan_np(img.get_data(), d,
+                                                sub_bias=sub_bias,
                                                 header=header)
         img.set_data(new_data_np)
         img.update_keywords(header)
