@@ -26,6 +26,7 @@ import time
 import math
 
 import numpy
+from astropy.io import fits
 
 from ginga.misc.plugins.Command import Command, CommandInterpreter
 from ginga import AstroImage, cmap
@@ -37,7 +38,7 @@ from ginga.misc import Bunch, Task
 cmap.add_matplotlib_cmaps(fail_on_import_error=False)
 
 from naoj.spcam.spcam_dr import SuprimeCamDR
-from naoj.hsc.hsc_dr import HyperSuprimeCamDR
+from naoj.hsc.hsc_dr import HyperSuprimeCamDR, hsc_ccd_data
 # add "Jon Tonley" color map
 from naoj.cmap import jt
 cmap.add_cmap("jt", jt.cmap_jt)
@@ -70,7 +71,7 @@ class GViewInterpreter(CommandInterpreter):
         self._plot_w = None
 
         # Peak finding parameters and selection criteria
-        self.radius = 10
+        self.radius = 20
         self.settings = {}
         self.max_side = self.settings.get('max_side', 1024)
         self.radius = self.settings.get('radius', 10)
@@ -89,6 +90,13 @@ class GViewInterpreter(CommandInterpreter):
         self.spcam_dr = SuprimeCamDR(logger=self.logger)
         self.hsc_dr = HyperSuprimeCamDR(logger=self.logger)
 
+        self.sub_bias = True
+        # For flat fielding
+        self.flat = {}
+        self.flat_dir = '.'
+        self.flat_filter = None
+        self.use_flat = False
+
     def add_channel_cb(self, gvshell, channel):
         fi = channel.fitsimage
         bm = fi.get_bindmap()
@@ -97,19 +105,28 @@ class GViewInterpreter(CommandInterpreter):
         bm.add_mode('z', 'zview', mode_type='locked', msg=None)
 
         # zview had this kind of zooming function
-        bm.map_event('zview', (), 'left', 'zoom_in')
-        bm.map_event('zview', (), 'right', 'zoom_out')
-        bm.map_event('zview', ('ctrl',), 'left', 'zoom_out')
+        bm.map_event('zview', (), 'ms_left', 'zoom_in')
+        bm.map_event('zview', (), 'ms_right', 'zoom_out')
+        bm.map_event('zview', ('ctrl',), 'ms_left', 'zoom_out')
 
-        bm.map_event('zview', (), 'p', 'radial-plot')
+        # borrow some bindings from pan mode
+        bm.map_event('zview', (), 'kp_left', 'pan_left')
+        bm.map_event('zview', (), 'kp_right', 'pan_right')
+        bm.map_event('zview', (), 'kp_up', 'pan_up')
+        bm.map_event('zview', (), 'kp_down', 'pan_down')
+        bm.map_event('zview', (), 'kp_s', 'pan_zoom_save')
+        bm.map_event('zview', (), 'kp_1', 'pan_zoom_set')
+
+        bm.map_event('zview', (), 'kp_p', 'radial-plot')
+        bm.map_event('zview', (), 'kp_r', 'radial-plot')
         fi.set_callback('keydown-radial-plot',
                         self.plot_cmd_cb, self.do_radial_plot,
                         "Radial Profile")
-        bm.map_event('zview', (), 'e', 'contour-plot')
+        bm.map_event('zview', (), 'kp_e', 'contour-plot')
         fi.set_callback('keydown-contour-plot',
                         self.plot_cmd_cb, self.do_contour_plot,
                         "Contours")
-        bm.map_event('zview', (), 'g', 'gaussians-plot')
+        bm.map_event('zview', (), 'kp_g', 'gaussians-plot')
         fi.set_callback('keydown-gaussians-plot',
                         self.plot_cmd_cb, self.do_gaussians_plot,
                         "FWHM")
@@ -223,6 +240,33 @@ class GViewInterpreter(CommandInterpreter):
 
         self.log('\n'.join(res))
 
+    def cmd_exps(self, n=20, hdrs=None):
+        """exps  [n=20, time=]
+
+        List the last n exposures in the current directory
+        """
+        cwd = os.getcwd()
+        files = glob.glob(cwd + '/HSCA*[0,2,4,6,8]00.fits')
+        files.sort()
+
+        n = int(n)
+        files = files[-n:]
+
+        res = []
+        for filepath in files:
+            with fits.open(filepath, 'readonly', memmap=False) as in_f:
+                header = in_f[0].header
+            line = "%(EXP-ID)-12.12s  %(HST-STR)12.12s  %(OBJECT)14.14s  %(FILTER01)8.8s" % header
+
+            # add user specified headers
+            if hdrs is not None:
+                for kwd in hdrs.split(','):
+                    fmt = "%%(%s)12.12s" % kwd
+                    line += '  ' + (fmt % header)
+            res.append(line)
+
+        self.log('\n'.join(res))
+
     def cmd_lsb(self):
         """lsb
 
@@ -261,15 +305,21 @@ class GViewInterpreter(CommandInterpreter):
         self.cmd_rmb(*args)
 
     def _ql(self, bufname, glob_pat, dr):
-        pattern = "%s/%s" % (os.getcwd(), glob_pat)
-        files = glob.glob(pattern)
+        if isinstance(glob_pat, str):
+            pattern = "%s/%s" % (os.getcwd(), glob_pat)
+            files = glob.glob(pattern)
+        else:
+            # arg is a "visit" number
+            exp_num = int(str(int(glob_pat)) + "00")
+            files = dr.exp_num_to_file_list(os.getcwd(), exp_num)
+
         fov_deg = dr.fov
 
         # read first image to seed mosaic
         seed = files[0]
         self.logger.debug("Reading seed image '%s'" % (seed))
         image = AstroImage.AstroImage(logger=self.logger)
-        image.load_file(seed)
+        image.load_file(seed, memmap=False)
 
         name = 'mosaic'
         self.logger.debug("Preparing blank mosaic")
@@ -277,13 +327,11 @@ class GViewInterpreter(CommandInterpreter):
         if bufname in self.buffers:
             self.log("Buffer %s is in use. Will discard the previous data" % (
                 bufname))
-            mosaic_img = self.buffers[bufname]
-            self.prepare_mosaic(image, fov_deg, mosaic_img=mosaic_img,
-                                name=name)
-        else:
-            # new buffer
-            mosaic_img = self.prepare_mosaic(image, fov_deg, name=name)
-            self.buffers[bufname] = mosaic_img
+            del self.buffers[bufname]
+
+        # new buffer
+        mosaic_img = self.prepare_mosaic(image, fov_deg, name=name)
+        self.buffers[bufname] = mosaic_img
 
         self.mosaic(files, mosaic_img, fov_deg=fov_deg, dr=dr, merge=True)
 
@@ -296,6 +344,45 @@ class GViewInterpreter(CommandInterpreter):
         """hql bufname glob_pat
         """
         self._ql(bufname, glob_pat, self.hsc_dr)
+
+    def cmd_bias(self, *args):
+        """bias on | off
+        """
+        if len(args) == 0:
+            self.log("bias %s" % (self.sub_bias))
+            return
+        res = str(args[0]).lower()
+        if res in ('y', 'yes', 't', 'true', '1', 'on'):
+            self.sub_bias = True
+        elif res in ('n', 'no', 'f', 'false', '0', 'off'):
+            self.sub_bias = False
+        else:
+            self.log("Don't understand parameter '%s'" % (onoff))
+
+    def cmd_flat(self, *args):
+        """flat on | off
+        """
+        if len(args) == 0:
+            self.log("flat %s" % (self.use_flat))
+            return
+        res = str(args[0]).lower()
+        if res in ('y', 'yes', 't', 'true', '1', 'on'):
+            self.use_flat = True
+        elif res in ('n', 'no', 'f', 'false', '0', 'off'):
+            self.use_flat = False
+        else:
+            self.log("Don't understand parameter '%s'" % (onoff))
+
+    def cmd_flatdir(self, *args):
+        """flatdir /some/path/to/flats
+        """
+        if len(args) > 0:
+            path = str(args[0])
+            if not os.path.isdir(path):
+                self.log("Not a directory: %s" % (path))
+                return
+            self.flat_dir = path
+        self.log("using (%s) for flats" % (self.flat_dir))
 
     def get_buffer_info(self, name):
         image = self.buffers[name]
@@ -539,8 +626,7 @@ class GViewInterpreter(CommandInterpreter):
 
         return d
 
-    def prepare_mosaic(self, image, fov_deg, name=None, mosaic_img=None,
-                       skew_limit=0.1):
+    def prepare_mosaic(self, image, fov_deg, name=None, skew_limit=0.1):
         """Prepare a new (blank) mosaic image based on the pointing of
         the parameter image
         """
@@ -561,37 +647,22 @@ class GViewInterpreter(CommandInterpreter):
         px_scale = math.fabs(cdelt1)
         cdbase = [numpy.sign(cdelt1), numpy.sign(cdelt2)]
 
-        if mosaic_img is None:
-            self.logger.debug("creating blank image to hold mosaic")
+        self.logger.debug("creating blank image to hold mosaic")
 
-            mosaic_img = dp.create_blank_image(ra_deg, dec_deg,
-                                               fov_deg, px_scale,
-                                               rot_deg,
-                                               cdbase=cdbase,
-                                               logger=self.logger,
-                                               pfx='mosaic',
-                                               dtype=dtype)
+        mosaic_img = dp.create_blank_image(ra_deg, dec_deg,
+                                           fov_deg, px_scale,
+                                           rot_deg,
+                                           cdbase=cdbase,
+                                           logger=self.logger,
+                                           pfx='mosaic',
+                                           dtype=dtype)
 
-            if name is not None:
-                mosaic_img.set(name=name)
-            imname = mosaic_img.get('name', image.get('name', "NoName"))
+        if name is not None:
+            mosaic_img.set(name=name)
+        imname = mosaic_img.get('name', image.get('name', "NoName"))
 
-            # avoid making a thumbnail of this
-            mosaic_img.set(nothumb=True, path=None)
-
-            # TODO: fill in interesting/select object headers from seed image
-
-        else:
-            # <-- reuse image (faster)
-            self.logger.debug("Reusing previous mosaic image")
-
-            mosaic_img = dp.recycle_image(mosaic_img,
-                                          ra_deg, dec_deg,
-                                          fov_deg, px_scale,
-                                          rot_deg,
-                                          cdbase=cdbase,
-                                          logger=self.logger,
-                                          pfx='mosaic')
+        # avoid making a thumbnail of this
+        mosaic_img.set(nothumb=True, path=None)
 
         header = mosaic_img.get_header()
         (rot, cdelt1, cdelt2) = wcs.get_rotation_and_scale(header,
@@ -618,8 +689,60 @@ class GViewInterpreter(CommandInterpreter):
         self.logger.debug("images digested")
 
 
+    def load_flat(self, ccd_id, filter_name):
+        self.logger.info("loading flat ccd_id=%d filter='%s'" % (
+            ccd_id, filter_name))
+        flat_file = os.path.join(self.flat_dir, filter_name,
+                                 "FLAT-%03d.fits[1]" % ccd_id)
+        self.log("attempting to load flat '%s'" % (flat_file))
+        image = AstroImage.AstroImage(logger=self.logger)
+        image.load_file(flat_file, memmap=False)
+
+        data_np = image.get_data()
+
+        # Adjust for how superflats are standardized in storage
+        # (channels L-R)
+        if hsc_ccd_data[ccd_id].swapxy:
+            data_np = data_np.swapaxes(0, 1)
+        if hsc_ccd_data[ccd_id].flipv:
+            data_np = numpy.flipud(data_np)
+        if hsc_ccd_data[ccd_id].fliph:
+            data_np = numpy.fliplr(data_np)
+
+        self.flat[ccd_id] = data_np
+
     def preprocess(self, image, dr):
-        dr.remove_overscan(image)
+        filter_name = image.get_keyword('FILTER01').strip().upper()
+        ccd_id = int(image.get_keyword('DET-ID'))
+
+        dr.remove_overscan(image, sub_bias=self.sub_bias)
+
+        if self.use_flat:
+            # flat field this piece, if flat provided
+            if filter_name != self.flat_filter:
+                self.log("Change of filter detected--resetting flats")
+                self.flat = {}
+                self.flat_filter = filter_name
+
+            try:
+                if not ccd_id in self.flat:
+                    self.load_flat(ccd_id, filter_name)
+
+                flat = self.flat[ccd_id]
+
+                data_np = image.get_data()
+                if data_np.shape == flat.shape:
+                    data_np /= flat
+
+                else:
+                    raise ValueError("flat for CCD %d shape %s does not match image CCD shape %s" % (ccd_id, flat.shape, data_np.shape))
+
+                header = {}
+                image = dp.make_image(data_np, image, header)
+
+            except Exception as e:
+                self.logger.warning("Error applying flat field: %s" % (str(e)))
+
         return image
 
     def mosaic_some(self, paths, mosaic_img, dr=None, merge=False):
@@ -627,8 +750,11 @@ class GViewInterpreter(CommandInterpreter):
         #self.log("paths are %s" % (str(paths)))
         for path in paths:
             self.logger.info("reading %s ..." % (path))
+            dirname, filename = os.path.split(path)
+            self.log("reading %s ..." % (filename))
+
             image = AstroImage.AstroImage(logger=self.logger)
-            image.load_file(path)
+            image.load_file(path, memmap=False)
 
             if dr is not None:
                 image = self.preprocess(image, dr)
@@ -636,41 +762,52 @@ class GViewInterpreter(CommandInterpreter):
 
         self.ingest_images(images, mosaic_img, merge=merge)
 
+        num_groups, self.num_groups = self.num_groups, self.num_groups-1
+        ## if num_groups == 1:
+        ##     self._update_gui(0, mosaic_img, self.total_files, self.start_time)
+
+    def __update_gui(self, res, mosaic_img, total_files, start_time):
+        self.fv.gui_do(self._update_gui, res, mosaic_img, total_files,
+                       start_time)
+
+    def _update_gui(self, res, mosaic_img, total_files, start_time):
+        end_time = time.time()
+        elapsed = end_time - start_time
+        self.log("mosaiced %d files in %.3f sec" % (
+            total_files, elapsed))
+        imname = mosaic_img.get('name', 'mosaic')
+        #self.fv.gui_do(mosaic_img.make_callback, 'modified')
+        self.fv.add_image(imname, mosaic_img, chname='GView')
+        self.log("done mosaicing")
+
     def mosaic(self, paths, mosaic_img, name='mosaic', fov_deg=0.2,
                num_threads=6, dr=None, merge=False):
 
-        total_files = len(paths)
-        if total_files == 0:
+        self.total_files = len(paths)
+        if self.total_files == 0:
             return
 
         ingest_count = 0
-        start_time = time.time()
+        self.start_time = time.time()
 
         groups = dp.split_n(paths, num_threads)
-        self.logger.info("len groups=%d" % (len(groups)))
-        tasks = []
+        self.num_groups = len(groups)
+        self.logger.info("len groups=%d" % (self.num_groups))
+        ## tasks = []
         for group in groups:
             ## self.fv.nongui_do(self.mosaic_some, group, mosaic_img,
             ##                   dr=dr, merge=merge)
-            tasks.append(Task.FuncTask(self.mosaic_some, (group, mosaic_img),
-                                       dict(dr=dr, merge=merge),
-                                       logger=self.logger))
-        t = Task.ConcurrentAndTaskset(tasks)
+            ## tasks.append(Task.FuncTask(self.mosaic_some, (group, mosaic_img),
+            ##                            dict(dr=dr, merge=merge),
+            ##                            logger=self.logger))
+            self.mosaic_some(group, mosaic_img, dr=dr, merge=merge)
+        ## t = Task.ConcurrentAndTaskset(tasks)
 
-        def _update_gui(res, mosaic_img, total_files, start_time):
-            end_time = time.time()
-            elapsed = end_time - start_time
-            self.log("mosaiced %d files in %.3f sec" % (
-                total_files, elapsed))
-            imname = mosaic_img.get('name', 'mosaic')
-            #self.fv.gui_do(mosaic_img.make_callback, 'modified')
-            self.fv.gui_do(self.fv.add_image, imname, mosaic_img,
-                           chname='GView')
-            self.log("done mosaicing")
-
-        t.register_callback(_update_gui, args=[mosaic_img, total_files,
-                                               start_time])
-        t.init_and_start(self.fv)
+        ## t.register_callback(self.__update_gui, args=[mosaic_img,
+        ##                                              self.total_files,
+        ##                                              self.start_time])
+        ## t.init_and_start(self.fv)
+        self._update_gui(0, mosaic_img, self.total_files, self.start_time)
 
     def __str__(self):
         return 'gview'
