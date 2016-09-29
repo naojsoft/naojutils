@@ -57,6 +57,9 @@ class GView(Command):
         ## fv.add_callback('delete-channel', self.delete_channel)
         ## fv.set_callback('channel-change', self.focus_cb)
 
+    def __str__(self):
+        return 'gview'
+
 
 class GViewInterpreter(CommandInterpreter):
 
@@ -808,8 +811,5 @@ class GViewInterpreter(CommandInterpreter):
         ##                                              self.start_time])
         ## t.init_and_start(self.fv)
         self._update_gui(0, mosaic_img, self.total_files, self.start_time)
-
-    def __str__(self):
-        return 'gview'
 
 #END
