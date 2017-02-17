@@ -6,123 +6,25 @@
 # This is open-source software licensed under a BSD license.
 # Please see the file LICENSE.txt for details.
 #
+"""
+Ginga plugin to visualize HSC detector array on a science field through
+the dither.
+
+Requires:
+  * ginga (https://github.com/naojsoft/ginga.git)
+  * naojutils (https://github.com/naojsoft/naojutils.git)
+"""
 import os
 import numpy
 import tempfile
 
 from ginga import GingaPlugin
-from ginga.misc import Widgets, Bunch, Future
+from ginga.gw import Widgets
+from ginga.misc import Bunch, Future
 from ginga.util import wcs, dp, catalog
 from ginga.util.six.moves import map
 
-from hsc_ccd_info import info
-
-sdo_map = {
-    0: '1_53',
-    1: '1_54',
-    2: '1_55',
-    3: '1_56',
-    4: '1_42',
-    5: '1_43',
-    6: '1_44',
-    7: '1_45',
-    8: '1_46',
-    9: '1_47',
-    10: '1_36',
-    11: '1_37',
-    12: '1_38',
-    13: '1_39',
-    14: '1_40',
-    15: '1_41',
-    16: '0_30',
-    17: '0_29',
-    18: '0_28',
-    19: '1_32',
-    20: '1_33',
-    21: '1_34',
-    22: '0_27',
-    23: '0_26',
-    24: '0_25',
-    25: '0_24',
-    26: '1_00',
-    27: '1_01',
-    28: '1_02',
-    29: '1_03',
-    30: '0_23',
-    31: '0_22',
-    32: '0_21',
-    33: '0_20',
-    34: '1_04',
-    35: '1_05',
-    36: '1_06',
-    37: '1_07',
-    38: '0_19',
-    39: '0_18',
-    40: '0_17',
-    41: '0_16',
-    42: '1_08',
-    43: '1_09',
-    44: '1_10',
-    45: '1_11',
-    46: '0_15',
-    47: '0_14',
-    48: '0_13',
-    49: '0_12',
-    50: '1_12',
-    51: '1_13',
-    52: '1_14',
-    53: '1_15',
-    54: '0_11',
-    55: '0_10',
-    56: '0_09',
-    57: '0_08',
-    58: '1_16',
-    59: '1_17',
-    60: '1_18',
-    61: '1_19',
-    62: '0_07',
-    63: '0_06',
-    64: '0_05',
-    65: '0_04',
-    66: '1_20',
-    67: '1_21',
-    68: '1_22',
-    69: '1_23',
-    70: '0_03',
-    71: '0_02',
-    72: '0_01',
-    73: '0_00',
-    74: '1_24',
-    75: '1_25',
-    76: '1_26',
-    77: '1_27',
-    78: '0_34',
-    79: '0_33',
-    80: '0_32',
-    81: '1_28',
-    82: '1_29',
-    83: '1_30',
-    84: '0_41',
-    85: '0_41',
-    86: '0_39',
-    87: '0_38',
-    88: '0_37',
-    89: '0_36',
-    90: '0_47',
-    91: '0_46',
-    92: '0_45',
-    93: '0_44',
-    94: '0_43',
-    95: '0_42',
-    96: '0_56',
-    97: '0_55',
-    98: '0_54',
-    99: '0_53',
-    100: '0_31',
-    101: '1_35',
-    102: '0_35',
-    103: '1_31',
-    }
+from naoj.hsc import ccd_info, sdo
 
 # ESO DSS server
 image_archives = [('ESO', 'eso', catalog.ImageServer,
@@ -134,7 +36,116 @@ image_archives = [('ESO', 'eso', catalog.ImageServer,
                   ]
 
 class HSCPlanner(GingaPlugin.LocalPlugin):
+    """
+    HSCPlanner works according to the following steps:
 
+    A) establish the pointing of the telescope
+    B) create a blank field or DSS field from the established pointing
+    C) place one or more targets within the field
+    D) set the acquisition parameters and visualize
+    E) repeat D) or from earlier steps as needed or desired
+
+    We will go over each of these steps in turn.
+
+    A) Establishing Pointing
+
+    To establish pointing, you can type RA and DEC coordinates (sexigesimal)
+    into the corresponding boxes under the "Position" section of the GUI and
+    click "Set Pointing".
+
+    Another way that is fairly easy is to drag a FITS image that has a
+    reasonably accurate WCS with pointing for the desired field into the
+    main window. Click anywhere on the image to set the RA and DEC boxes,
+    and you can then click "Set Pointing".
+
+    You can use this image as the background image (and skip Step B) if
+    the FOV is wide enough to show your target of interest (HSC FOV is
+    approx 1.5 deg).
+
+
+    B) Create Field from Pointing
+
+    Once pointing is established, we need to create a background field with
+    correct WCS to do the correct overplotting to visualize the acquisition.
+    You can either load your own background image (already discussed),
+    create a blank field, or download a DSS image of the field (if available).
+
+    To create a blank image click "Create Blank". To download a DSS field
+    click "Get DSS". To use the DSS function you will need a functioning
+    internet connection.
+
+    ----------------------------------------------
+    NOTE: the default location for DSS download is from ESO's web site and
+    it may take up to a minute to download and update the background image.
+    If you experience trouble acquiring a DSS image it is recommended that
+    you download your own background FITS image and load it in step A.
+    ----------------------------------------------
+
+    C) Placing Targets within the Field
+
+    To place targets within the field, you can type RA and DEC coordinates
+    as in step A above or simply click in the field where you want a target
+    (as in step A the RA and DEC boxes will be filled when you click).
+    Press "Add Target" to add the current RA/DEC as a target. To clear the
+    target list, press "Clear All".
+
+    D) Set the Acquisition Parameters and Visualize
+
+    Now we are finally ready to set the acquisition parameters and visualize
+    the field throughout the dither. In the section labeled "Acquisition"
+    you can set any of the parameters normally used for HSC acquisition.
+
+    The parameters are:
+
+    - Dither type: 1 for a single shot, 5 for a 5-point box pattern, and N
+    for an N-point circular pattern
+
+    - Dither steps: only settable for N-type dither, set it to the number
+    of dither positions
+
+    - INSROT_PA: this parameter will set up the instrument rotator to set
+    the rotation of the field on the CCD plane--see the instrument
+    documentation for details
+
+    - RA Offset, DEC Offset: offsets in arc seconds from the pointing
+    position in the center of the field
+
+    - Dith1, Dith2 (Delta RA, Delta DEC or RDITH, TDITH): the names of
+    these parameters change according to the dither type selected.
+    For Dither Type 1 they are not used.  For Dither Type 5, these
+    parameters specify the offsets in arc seconds for Delta RA and Delta DEC
+    to accomplish the dither between positions.  For Dither Type N they
+    specify the offset in arc seconds (RDITH) and the angle offset in
+    degrees (TDITH) for the circular dither.  See the instrument documentation
+    for more information.
+
+    - Skip: the number of shots to skip from the beginning of a dither.
+    Leave at the default for the full dither.
+
+    - Stop: used to terminate a dither early after a certain number of shots.
+    Leave at the default for the full dither.
+
+    Once you have set the parameters as desired, press the "Update Image"
+    button to update the overlays. You can then use the "Show Step" control
+    to step through your dither.
+
+    NOTE
+
+    There is currently a bug with the "Show Step" control that you need to
+    change at least two steps before the program starts responding to the
+    step adjustment after doing an "Update Image".
+
+    HINTS
+
+    It may be helpful to view the field first with the image zoomed out,
+    and then later to pan to your target (hint: use Shift+click to set pan
+    position) and zoom in to more closely watch the detailed positioning of
+    the target(s) on the detector grid.
+
+    E) Repeat as Desired
+
+    You can go back to any step and repeat from there as needed.
+    """
     def __init__(self, fv, fitsimage):
         # superclass defines some variables for us, like logger
         super(HSCPlanner, self).__init__(fv, fitsimage)
@@ -172,10 +183,10 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         self.dsscnt = 0
         self.tmpdir = tempfile.mkdtemp()
 
-        self.dc = fv.getDrawClasses()
+        self.dc = fv.get_draw_classes()
         canvas = self.dc.DrawingCanvas()
         canvas.add_callback('cursor-down', self.btn_down_cb)
-        canvas.setSurface(self.fitsimage)
+        canvas.set_surface(self.fitsimage)
         self.canvas = canvas
 
     def build_gui(self, container):
@@ -185,18 +196,6 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         vbox, sw, orientation = Widgets.get_oriented_box(container)
         vbox.set_border_width(4)
         vbox.set_spacing(2)
-
-        self.msgFont = self.fv.getFont("sansFont", 12)
-        tw = Widgets.TextArea(wrap=True, editable=False)
-        tw.set_font(self.msgFont)
-        self.tw = tw
-
-        fr = Widgets.Expander("Instructions")
-        vbox2 = Widgets.VBox()
-        vbox2.add_widget(tw)
-        #vbox2.add_widget(Widgets.Label(''), stretch=1)
-        fr.set_widget(vbox2)
-        vbox.add_widget(fr, stretch=0)
 
         fr = Widgets.Frame("Position")
 
@@ -304,6 +303,9 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         btn = Widgets.Button("Close")
         btn.add_callback('activated', lambda w: self.close())
         btns.add_widget(btn, stretch=0)
+        btn = Widgets.Button("Help")
+        btn.add_callback('activated', lambda w: self.help())
+        btns.add_widget(btn, stretch=0)
         btns.add_widget(Widgets.Label(''), stretch=1)
         top.add_widget(btns, stretch=0)
 
@@ -393,7 +395,8 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
 
             self.draw_dither_positions()
 
-            self.fv.error_wrap(self.draw_ccds, self.ctr_ra_deg, self.ctr_dec_deg)
+            self.fv.error_wrap(self.draw_ccds,
+                               self.ctr_ra_deg, self.ctr_dec_deg)
 
             start = int(self.w.skip.get_value()) + 1
             stop = int(self.w.stop.get_value())
@@ -420,8 +423,6 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         dra = float(self.w.dith1.get_text()) / 3600.0
         ddec = float(self.w.dith2.get_text()) / 3600.0
 
-        ## ctr_ra, ctr_dec = wcs.add_offset_radec(
-        ##     self.ctr_ra_deg, self.ctr_dec_deg, mra * dra, mdec * ddec)
         ctr_ra, ctr_dec = wcs.add_offset_radec(
             self.ctr_ra_deg, self.ctr_dec_deg,
             mra * dra + self.ra_off_deg, mdec * ddec + self.dec_off_deg)
@@ -437,8 +438,6 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         cos_res = numpy.cos(numpy.radians(n * 360.0/ndith + tdith))
         self.logger.debug("sin=%f cos=%f" % (sin_res, cos_res))
 
-        ## ctr_ra, ctr_dec = wcs.add_offset_radec(
-        ##     self.ctr_ra_deg, self.ctr_dec_deg, cos_res * rdith, sin_res * rdith)
         ctr_ra, ctr_dec = wcs.add_offset_radec(
             self.ctr_ra_deg, self.ctr_dec_deg,
             cos_res * rdith + self.ra_off_deg,
@@ -501,18 +500,18 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         return True
 
     def close(self):
-        chname = self.fv.get_channelName(self.fitsimage)
+        chname = self.fv.get_channel_name(self.fitsimage)
         self.fv.stop_local_plugin(chname, str(self))
         return True
 
-    def instructions(self):
-        self.tw.set_text(instructions)
+    def help(self):
+        name = str(self).capitalize()
+        self.fv.show_help_text(name, self.__doc__, wsname='channels')
 
     def start(self):
-        self.instructions()
         # start operation
         try:
-            obj = self.fitsimage.getObjectByTag(self.layertag)
+            obj = self.fitsimage.get_object_by_tag(self.layertag)
 
         except KeyError:
             # Add our layer
@@ -525,16 +524,16 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
 
     def resume(self):
         self.canvas.ui_setActive(True)
-        self.fv.showStatus("")
+        self.fv.show_status("")
 
     def stop(self):
         # remove the canvas from the image
         try:
-            self.fitsimage.deleteObjectByTag(self.layertag)
+            self.fitsimage.delete_object_by_tag(self.layertag)
         except:
             pass
         self.canvas.ui_setActive(False)
-        self.fv.showStatus("")
+        self.fv.show_status("")
 
     def redo(self):
         image = self.fitsimage.get_image()
@@ -580,6 +579,7 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         l.append(ctr_pt)
         self.ctr_pt = ctr_pt
 
+        info = ccd_info.info
         paths = self.get_paths(ctr_ra_deg, ctr_dec_deg, info)
 
         start, stop, dither_positions = self.get_dither_positions()
@@ -610,7 +610,7 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
 
             # annotate with the CCD name
             pcx, pcy = p.get_center_pt()
-            name = sdo_map[key]
+            name = sdo.sdo_map[key]
             t = self.dc.Text(pcx, pcy, text=name, color=color, fontsize=12,
                              coord='data')
 
@@ -619,7 +619,7 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
 
         obj = self.dc.CompoundObject(*l)
 
-        self.canvas.deleteObjectByTag('ccd_overlay')
+        self.canvas.delete_object_by_tag('ccd_overlay')
         self.canvas.add(obj, tag='ccd_overlay', redraw=False)
 
         # rotate for pa
@@ -630,9 +630,9 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         self.logger.debug("canvas rotated")
 
     def draw_dither_positions(self):
-        Text = self.canvas.getDrawClass('text')
-        Point = self.canvas.getDrawClass('point')
-        CompoundObject = self.canvas.getDrawClass('compoundobject')
+        Text = self.canvas.get_draw_class('text')
+        Point = self.canvas.get_draw_class('point')
+        CompoundObject = self.canvas.get_draw_class('compoundobject')
 
         image = self.fitsimage.get_image()
 
@@ -647,15 +647,15 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
             i += 1
         obj = CompoundObject(*l)
 
-        self.canvas.deleteObjectByTag('dither_positions')
+        self.canvas.delete_object_by_tag('dither_positions')
         self.canvas.add(obj, tag='dither_positions')
 
     def draw_targets(self):
-        self.canvas.deleteObjects(self.canvas.getObjectsByTagpfx('target'))
+        self.canvas.delete_objects(self.canvas.get_objects_by_tag_pfx('target'))
 
-        Point = self.canvas.getDrawClass('point')
-        Circle = self.canvas.getDrawClass('circle')
-        CompoundObject = self.canvas.getDrawClass('compoundobject')
+        Point = self.canvas.get_draw_class('point')
+        Circle = self.canvas.get_draw_class('circle')
+        CompoundObject = self.canvas.get_draw_class('compoundobject')
 
         for i, tgt in enumerate(self.targets):
             self.canvas.add(CompoundObject(
@@ -724,7 +724,7 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
             params = dict(ra=ra_txt, dec=dec_txt, width=wd, height=ht)
 
             # Query the server and download file
-            srvbank = self.fv.get_ServerBank()
+            srvbank = self.fv.get_server_bank()
             filename = 'sky-' + str(self.dsscnt) + '.fits'
             self.dsscnt = (self.dsscnt + 1) % 5
             filepath = os.path.join(self.tmpdir, filename)
@@ -796,73 +796,5 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         return 'hscplanner'
 
 
-instructions = """
-HSCPlanner works according to the following steps:
-
-A) establish the pointing of the telescope
-B) create a blank field or DSS field from the established pointing
-C) place one or more targets within the field
-D) set the acquisition parameters and visualize
-E) repeat D) or from earlier steps as needed or desired
-
-We will go over each of these steps in turn.
-
-A) Establishing Pointing
-
-To establish pointing, you can type RA and DEC coordinates (sexigesimal) into the corresponding boxes under the "Position" section of the GUI and click "Set Pointing".
-
-Another way that is fairly easy is to drag a FITS image that has a reasonably accurate WCS with pointing for the desired field into the main window. Click anywhere on the image to set the RA and DEC boxes, and you can then click "Set Pointing".
-
-You can use this image as the background image (and skip Step B) if the FOV is wide enough to show your target of interest (HSC FOV is approx 1.5 deg).
-
-
-B) Create Field from Pointing
-
-Once pointing is established, we need to create a background field with correct WCS to do the correct overplotting to visualize the acquisition. You can either load your own background image (already discussed), create a blank field, or download a DSS image of the field (if available).
-
-To create a blank image click "Create Blank". To download a DSS field click "Get DSS". To use the DSS function you will need a functioning internet connection.
-
-----------------------------------------------
-NOTE: the default location for DSS download is from ESO's web site and it may take up to a minute to download and update the background image.  If you experience trouble acquiring a DSS image it is recommended that you download your own background FITS image and load it in step A.
-----------------------------------------------
-
-B) Placing Targets within the Field
-
-To place targets within the field, you can type RA and DEC coordinates as in step A above or simply click in the field where you want a target (as in step A the RA and DEC boxes will be filled when you click). Press "Add Target" to add the current RA/DEC as a target. To clear the target list, press "Clear All".
-
-Set the Acquisition Parameters
-
-Now we are finally ready to set the acquisition parameters and visualize the field throughout the dither. In the section labeled "Acquisition" you can set any of the parameters normally used for HSC acquisition.
-
-The parameters are:
-
-- Dither type: 1 for a single shot, 5 for a 5-point box pattern, and N for an N-point circular pattern
-
-- Dither steps: only settable for N-type dither, set it to the number of dither positions
-
-- INSROT_PA: this parameter will set up the instrument rotator to set the rotation of the field on the CCD plane--see the instrument documentation for details
-
-- RA Offset, DEC Offset: offsets in arc seconds from the pointing position in the center of the field
-
-- Dith1, Dith2 (Delta RA, Delta DEC or RDITH, TDITH): the names of these parameters change according to the dither type selected.  For Dither Type 1 they are not used.  For Dither Type 5, these parameters specify the offsets in arc seconds for Delta RA and Delta DEC to accomplish the dither between positions.  For Dither Type N they specify the offset in arc seconds (RDITH) and the angle offset in degrees (TDITH) for the circular dither.  See the instrument documentation for more information.
-
-- Skip: the number of shots to skip from the beginning of a dither. Leave at the default for the full dither.
-
-- Stop: used to terminate a dither early after a certain number of shots.  Leave at the default for the full dither.
-
-Once you have set the parameters as desired, press the "Update Image" button to update the overlays. You can then use the "Show Step" control to step through your dither.
-
-NOTE
-
-There is currently a bug with the "Show Step" control that you need to change at least two steps before the program starts responding to the step adjustment after doing an "Update Image".
-
-HINTS
-
-It may be helpful to view the field first with the image zoomed out, and then later to pan to your target (hint: use Shift+click to set pan position) and zoom in to more closely watch the detailed positioning of the target(s) on the detector grid.
-
-Repeat as Desired
-
-You can go back to any step and repeat from there as needed.
-"""
 
 #END

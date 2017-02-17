@@ -611,8 +611,9 @@ _hsc_ccd_data = {
           4: {'osminx': 1608, 'osminy': 4225, 'osmaxx': 1623, 'osmaxy': 4240, 'startposx': 1536, 'efmaxy': 4224, 'efmaxx': 2135, 'efminy': 49, 'efminx': 1624, 'gain': 3.5499999999999998},
           'image': {'xcut': 64, 'newwd': 2048, 'newht': 4176, 'ccd_id': 111, 'ycut': 16}}}
 
-_ccd_addl_info1 = {
-    0: {'bee_id': 1, 'sdo_id': 53},
+ccd_aux_info1 = {
+    # key is DET-ID (detector id); contents are BEE-ID and SDO-ID
+    0: {'bee_id': 1, 'sdo_id': 53, 'bad_channels': [3]},
     1: {'bee_id': 1, 'sdo_id': 54},
     2: {'bee_id': 1, 'sdo_id': 55},
     3: {'bee_id': 1, 'sdo_id': 56},
@@ -621,7 +622,7 @@ _ccd_addl_info1 = {
     6: {'bee_id': 1, 'sdo_id': 44},
     7: {'bee_id': 1, 'sdo_id': 45},
     8: {'bee_id': 1, 'sdo_id': 46},
-    9: {'bee_id': 1, 'sdo_id': 47},
+    9: {'bee_id': 1, 'sdo_id': 47, 'bad_channels': [1, 2]},
     10: {'bee_id': 1, 'sdo_id': 36},
     11: {'bee_id': 1, 'sdo_id': 37},
     12: {'bee_id': 1, 'sdo_id': 38},
@@ -645,7 +646,7 @@ _ccd_addl_info1 = {
     30: {'bee_id': 0, 'sdo_id': 23},
     31: {'bee_id': 0, 'sdo_id': 22},
     32: {'bee_id': 0, 'sdo_id': 21},
-    33: {'bee_id': 0, 'sdo_id': 20},
+    33: {'bee_id': 0, 'sdo_id': 20, 'bad_channels': [3, 4]},
     34: {'bee_id': 1, 'sdo_id': 4},
     35: {'bee_id': 1, 'sdo_id': 5},
     36: {'bee_id': 1, 'sdo_id': 6},
@@ -655,7 +656,7 @@ _ccd_addl_info1 = {
     40: {'bee_id': 0, 'sdo_id': 17},
     41: {'bee_id': 0, 'sdo_id': 16},
     42: {'bee_id': 1, 'sdo_id': 8},
-    43: {'bee_id': 1, 'sdo_id': 9},
+    43: {'bee_id': 1, 'sdo_id': 9, 'bad_channels': [3, 4]},
     44: {'bee_id': 1, 'sdo_id': 10},
     45: {'bee_id': 1, 'sdo_id': 11},
     46: {'bee_id': 0, 'sdo_id': 15},
@@ -732,7 +733,7 @@ for ccd_id in _hsc_ccd_data.keys():
     for key, dv in _hsc_ccd_data[ccd_id].items():
         res[key] = Bunch.Bunch(dv)
 
-    addl_d = _ccd_addl_info1.get(ccd_id, {})
+    addl_d = ccd_aux_info1.get(ccd_id, {})
     sdo_id = addl_d['sdo_id']
     if addl_d['bee_id'] == 0:
         res.fliph = True

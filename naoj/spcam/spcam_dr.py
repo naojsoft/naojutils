@@ -78,9 +78,18 @@ class SuprimeCamDR(object):
             'RADECSYS', 'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2',
             ]
 
+    def load_image(self, filepath):
+        from astropy.io import fits
+        with fits.open(filepath, 'readonly', memmap=False) as in_f:
+            hdu = in_f[0]
+            metadata = dict(header=hdu.header)
+            image = AstroImage.AstroImage(data_np=hdu.data, metadata=metadata,
+                                          logger=self.logger)
+            return image
+
     def get_exp_num(self, frameid):
         frame = Frame(frameid)
-        exp_num = (frame.number // self.num_frames) * self.num_frames
+        exp_num = (frame.count // self.num_frames) * self.num_frames
         return exp_num
 
     def exp_num_to_file_list(self, directory, exp_num):
@@ -88,24 +97,29 @@ class SuprimeCamDR(object):
         frame.directory = directory
         frame.inscode = self.inscode
         frame.frametype = 'A'
-        frame.prefix = 0
+        frame.prefix = '0'
         frame.number = 0
+        frame.add(exp_num)
 
-        nums = map(lambda off: exp_num+off, self.frameid_offsets)
         res = []
-        for num in nums:
-            frame.number = num
-            res.append(os.path.join(directory, str(frame)+'.fits'))
+        for off in self.frameid_offsets:
+            fr = frame.copy()
+            fr.add(off)
+            res.append(os.path.join(directory, str(fr)+'.fits'))
         return res
 
     def get_file_list(self, path):
         frame = Frame(path)
         exp_num = self.get_exp_num(path)
-        nums = map(lambda off: exp_num+off, self.frameid_offsets)
+        frame.prefix = '0'
+        frame.number = 0
+        frame.add(exp_num)
+
         res = []
-        for num in nums:
-            frame.number = num
-            res.append(os.path.join(frame.directory, str(frame)+'.fits'))
+        for off in self.frameid_offsets:
+            fr = frame.copy()
+            fr.add(off)
+            res.append(os.path.join(frame.directory, str(fr)+'.fits'))
         return res
 
     def get_images(self, path):
@@ -243,6 +257,7 @@ class SuprimeCamDR(object):
                   logger=None):
 
         flats = []
+        self.logger.info("making a median flat from %s" % str(flatlist))
         for path in flatlist:
             image = AstroImage.AstroImage(logger=logger)
             image.load_file(path)
@@ -275,7 +290,7 @@ class SuprimeCamDR(object):
 
         # Get the median values for each CCD image
         flats = []
-        for i in xrange(self.num_frames):
+        for i in range(self.num_frames):
             flatlist = []
             for exp in explist:
                 path = os.path.join(datadir, exp.upper()+'.fits')
@@ -296,16 +311,16 @@ class SuprimeCamDR(object):
         # losing much precision?
         # flatarr = numpy.array([ image.get_data() for image in flats ])
         # mval = numpy.median(flatarr.flat)
-        flatarr = numpy.array([ numpy.median(image.get_data())
-                                for image in flats ])
-        mval = numpy.mean(flatarr)
+        ## flatarr = numpy.array([ numpy.median(image.get_data())
+        ##                         for image in flats ])
+        ## mval = numpy.mean(flatarr)
 
         d = {}
         for image in flats:
-            flat = image.get_data()
-            flat /= mval
-            # no zero divisors
-            flat[flat == 0.0] = 1.0
+            ## flat = image.get_data()
+            ## flat /= mval
+            ## # no zero divisors
+            ## flat[flat == 0.0] = 1.0
             ccd_id = int(image.get_keyword('DET-ID'))
 
             if output_dir is None:
@@ -346,7 +361,7 @@ class SuprimeCamDR(object):
 
         # make a list of all the exposure ids
         explist = []
-        for i in xrange(num_exp):
+        for i in range(num_exp):
             frame = Frame(path=path)
             frame.number += i * self.num_frames
             explist.append(str(frame))
@@ -361,16 +376,80 @@ class SuprimeCamDR(object):
 
         path_glob = os.path.join(datadir, '*-*.fits')
         d = {}
+        avgs = []
         for path in glob.glob(path_glob):
             match = re.match(r'^.+\-(\d+)\.fits$', path)
             if match:
                 ccd_id = int(match.group(1))
-                image = AstroImage.AstroImage(logger=self.logger)
-                image.load_file(path)
+                image = self.load_image(path)
+                #image = AstroImage.AstroImage(logger=self.logger)
+                #image.load_file(path)
 
-                d[ccd_id] = image.get_data()
+                data = image.get_data()
+                d[ccd_id] = data
 
-        return d
+                avgs.append(numpy.mean(data))
+
+        self.logger.info("calculating mean of flats")
+        flatarr = numpy.array(avgs)
+        mval = numpy.mean(flatarr)
+
+        return mval, d
+
+
+    def make_exp_tiles(self, path_exp, flat_dict={}, flat_mean=None,
+                       output_pfx='exp', output_dir=None):
+
+        files = self.get_file_list(path_exp)
+        res = {}
+
+        for path in files:
+            if not os.path.exists(path):
+                continue
+
+            image = self.load_image(path)
+            #image = AstroImage.AstroImage(logger=self.logger)
+            #image.load_file(path)
+
+            ccd_id = int(image.get_keyword('DET-ID'))
+
+            data_np = image.get_data()
+
+            # subtract overscan and trim
+            d = self.get_regions(image)
+            header = {}
+            newarr = self.subtract_overscan_np(data_np, d,
+                                               header=header)
+
+            if ccd_id in flat_dict:
+                flat = flat_dict[ccd_id]
+
+                if newarr.shape == flat.shape:
+                    if flat_mean is not None:
+                        avg = flat_mean
+                    else:
+                        avg = numpy.mean(flat)
+
+                    newarr /= flat
+                    newarr *= avg
+
+            img_exp = dp.make_image(newarr, image, header)
+
+            if output_dir is None:
+                res[ccd_id] = img_exp
+            else:
+                # write the output file
+                name = '%s-%d.fits' % (output_pfx, ccd_id)
+                outfile = os.path.join(output_dir, name)
+                res[ccd_id] = outfile
+                self.logger.debug("Writing output file: %s" % (outfile))
+                try:
+                    os.remove(outfile)
+                except OSError:
+                    pass
+                img_exp.save_as_file(outfile)
+
+        return res
 
 
     def prepare_mosaic(self, image, fov_deg, skew_limit=0.1):
@@ -506,7 +585,7 @@ class SuprimeCamDR(object):
             i += 1
 
         # stack HDUs in detector ID order
-        for i in xrange(self.num_ccds):
+        for i in range(self.num_ccds):
             fitsobj.append(hdus[i])
 
         # fix up to FITS standard as much as possible
