@@ -5,16 +5,15 @@ from setuptools import setup, find_packages
 #
 entry_points = """
 [ginga.rv.plugins]
-HSCPlanner=plugins:setup_HSCPlanner
+hscplanner=plugins:setup_hscplanner
 """
 
 setup(
-    name = 'NAOJGingaPlugins',
+    name = 'naojutils_ginga_plugins',
     version = "0.2",
-    description = "Plugins for the Ginga reference viewer",
+    description = "Specialty plugins for the Ginga reference viewer",
     author = "OCS Group, Software Division, Subaru Telescope, NAOJ",
     license = "BSD",
-    # change this to your URL
     url = "http://naojsoft.github.com/naojutils",
     install_requires = ["ginga>=2.6.2"],
     packages = find_packages(),
