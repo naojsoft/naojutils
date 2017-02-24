@@ -27,7 +27,15 @@ If you want to install to a specific area, do
 The files will then end up under /some/path
 
 NOTE: If you want to install the optional Ginga plugins, you must also
-repeat the setup.py in the "ginga_plugins" directory.  This is not
-necessary if you don't plan to use those plugins.
+repeat the "setup.py" operation in the "ginga_plugins" directory, e.g.:
 
+    $ cd ginga_plugins
+    $ python setup.py build
 
+or
+
+    $ cd ginga_plugins
+    $ python setup.py install
+
+The above steps are not necessary if you don't plan to use those
+plugins.
