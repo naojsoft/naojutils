@@ -121,6 +121,15 @@ class Frame(object):
         else:
             self.number = res
 
+    def copy(self):
+        fr = Frame()
+        fr.from_frameid(str(self))
+
+        fr.path = self.path
+        fr.filename = self.filename
+        fr.directory = self.directory
+        return fr
+
     def __repr__(self):
         return str(self)
 
