@@ -164,7 +164,7 @@ class SuprimeCamDR(object):
             l.append(d[channel])
 
         # figure out starting x position of channel within image
-        l.sort(cmp=lambda x, y: x.efmaxx - y.efmaxx)
+        l.sort(key=lambda x: x.efmaxx)
         startposx = 0
         for ch in l:
             ch.setvals(startposx=startposx)
