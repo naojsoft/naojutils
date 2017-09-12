@@ -1,11 +1,13 @@
 #
-# hsc_dr.py -- Suprime-Cam data processing routines
+# hsc_dr.py -- Hyper Suprime-Cam data processing routines
 #
 # Eric Jeschke (eric@naoj.org)
 #
 # This is open-source software licensed under a BSD license.
 # Please see the file LICENSE.txt for details.
 #
+import os.path
+
 from ginga.misc import Bunch
 
 from ..spcam.spcam_dr import SuprimeCamDR
@@ -28,6 +30,7 @@ num_frames = 200
 num_ccds = 112
 fov = 2.0
 
+
 class HyperSuprimeCamDR(SuprimeCamDR):
 
     def __init__(self, logger=None):
@@ -45,6 +48,22 @@ class HyperSuprimeCamDR(SuprimeCamDR):
     def get_regions(self, image):
         ccd_id = int(image.get_keyword('DET-ID'))
         return hsc_ccd_data[ccd_id]
+
+    def object_to_file_list(self, beedir0, beedir1, file_pfx):
+        """Takes two bees directories and a file prefix for an exposure.
+        Returns a dictionary with keys 'bee0' and 'bee1': each one is a
+        list of all the file paths making up the CCD images in the
+        exposure.
+        """
+
+        res = dict(bee0=[], bee1=[])
+        base = {0: beedir0, 1: beedir1}
+
+        for key, d in ccd_aux_info1.items():
+            bee_id, sdo_id = d['bee_id'], d['sdo_id']
+            filename = file_pfx + '_%d_%02d.fits' % (bee_id, sdo_id)
+            res['bee%d' % bee_id].append(os.path.join(base[bee_id], filename))
+        return res
 
 
 # HSC CCD DATA (in case we can't read the header)
