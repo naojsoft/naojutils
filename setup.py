@@ -25,7 +25,8 @@ setup(
     license = "BSD",
     keywords = "NAOJ, subaru, telescope, instrument, data",
     url = "http://naojsoft.github.com/naojutils",
-    packages = ['naoj', 'naoj.cmap', 'naoj.spcam', 'naoj.hsc'],
+    packages = ['naoj', 'naoj.cmap', 'naoj.spcam', 'naoj.hsc',
+                'naoj.focas'],
     package_data = { },
     scripts = [],
     classifiers = [
