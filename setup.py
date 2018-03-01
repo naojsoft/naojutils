@@ -27,7 +27,7 @@ setup(
     url = "http://naojsoft.github.com/naojutils",
     packages = ['naoj', 'naoj.cmap', 'naoj.spcam', 'naoj.hsc',
                 'naoj.focas'],
-    package_data = { },
+    package_data = { 'naoj.focas': ['ifu_regions/*.reg'] },
     scripts = [],
     classifiers = [
         "License :: OSI Approved :: BSD License",

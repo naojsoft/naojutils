@@ -9,7 +9,7 @@ USAGE: python reconstruct_image.py right.fits left.fits -o output.fits
     output_fits: output file name
 
 """
-import sys
+import sys, os
 import re
 import numpy as np
 from astropy.io import fits
@@ -18,6 +18,9 @@ from astropy.io import fits
 import biassub as bs
 
 version = "20180226.0"
+
+# this will hold region data
+regions = {}
 
 def read_region_file(region_file):
     # Reading the region file
@@ -36,7 +39,8 @@ def read_region_file(region_file):
 
     return regdata
 
-def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data):
+def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data=None):
+    global regions
 
     # subtract bias and combine channels
     hdl = bs.bias_subtraction(fitsfile_ch1, fitsfile_ch2)
@@ -51,6 +55,9 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data):
             binfac1))
 
     reg = region_data
+    if reg is None:
+        reg = regions[int(binfac1)]
+
     # extract data from regions
     # 最初のボックスの縦横幅を全ての領域の縦横幅にしているので注意。
     # numpy配列では (Y,X) のようになる。
@@ -106,6 +113,15 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data):
     newhdr['CD2_2'] = newrot[1, 1] * yscale
 
     return hdulst
+
+# read in our regions data, so we don't have to re-read it over and over
+modulehome, _xx = os.path.split(bs.__file__)
+for binning in (1, 2, 4):
+    # if no region data is passed, read one based on the binning
+    regionfile = os.path.join(modulehome, "ifu_regions",
+                              "pseudoslits%d.reg" % binning)
+    regions[binning] = read_region_file(regionfile)
+
 
 def main(options, args):
 

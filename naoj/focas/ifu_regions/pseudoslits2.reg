@@ -1,0 +1,26 @@
+# Region file format: DS9 version 4.1
+global color=green dashlist=8 3 width=1 font="helvetica 10 normal roman" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1
+image
+box(271,1016,79,16,0) # text={23}
+box(343,1045,79,16,0) # text={22}
+box(414,1071,79,16,0) # text={21}
+box(485,1093,79,16,0) # text={20}
+box(555,1112,79,16,0) # text={19}
+box(627,1130,79,16,0) # text={18}
+box(697,1149,79,16,0) # text={17}
+box(767,1161,79,16,0) # text={16}
+box(838,1170,79,16,0) # text={15}
+box(908,1177,79,16,0) # text={14}
+box(979,1180,79,16,0) # text={13}
+box(1090,1184,79,16,0) # text={12}
+box(1160,1181,79,16,0) # text={11}
+box(1230,1174,79,16,0) # text={10}
+box(1301,1165,79,16,0) # text={9}
+box(1372,1154,79,16,0) # text={8}
+box(1443,1141,79,16,0) # text={7}
+box(1514,1122,79,16,0) # text={6}
+box(1585,1103,79,16,0) # text={5}
+box(1656,1081,79,16,0) # text={4}
+box(1728,1056,79,16,0) # text={3}
+box(1800,1028,79,16,0) # text={2}
+box(1873,997,79,16,0) # text={1}
