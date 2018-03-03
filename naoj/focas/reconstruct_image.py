@@ -98,7 +98,7 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data=None):
     cd_rot = cd / np.sqrt(det)
 
     # Rotation matrix of the IFU field with respect to hte FOCAS field
-    theta = 21.38 # degree
+    theta = -21.38 # degree
     theta = np.deg2rad(theta)
     rot = np.matrix([[np.cos(theta), -np.sin(theta)],
                      [np.sin(theta), np.cos(theta)]])
