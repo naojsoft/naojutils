@@ -1,21 +1,13 @@
-#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 # Shinobu Ozaki
-"""
-USAGE: python reconstruct_image.py right.fits left.fits -o output.fits
-
-    right.fits: right image file name (smaller file number)
-    left.fits: left image file name (larger file number)
-    output_fits: output file name
-
-"""
+from __future__ import absolute_import
 import sys, os
 import re
 import numpy as np
 from astropy.io import fits
 
 # local imports
-import biassub as bs
+from . import biassub as bs
 
 version = "20180226.0"
 
@@ -39,11 +31,12 @@ def read_region_file(region_file):
 
     return regdata
 
-def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data=None):
+def reconstruct_image(fitsfile_ch1, fitsfile_ch2,
+                      template_pfx='bias_template', regionfile=None):
     global regions
 
     # subtract bias and combine channels
-    hdl = bs.bias_subtraction(fitsfile_ch1, fitsfile_ch2)
+    hdl = bs.biassub(fitsfile_ch1, fitsfile_ch2, template_pfx=template_pfx)
 
     scidata = hdl[0].data
     # Getting the binning information
@@ -54,9 +47,10 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2, region_data=None):
         raise ValueError("X binning factor is not 1, 2 or 4: BIN-FCT1=%d" % (
             binfac1))
 
-    reg = region_data
-    if reg is None:
+    if regionfile is None:
         reg = regions[int(binfac1)]
+    else:
+        reg = read_region_file(regionfile)
 
     # extract data from regions
     # 最初のボックスの縦横幅を全ての領域の縦横幅にしているので注意。
@@ -121,33 +115,3 @@ for binning in (1, 2, 4):
     regionfile = os.path.join(modulehome, "ifu_regions",
                               "pseudoslits%d.reg" % binning)
     regions[binning] = read_region_file(regionfile)
-
-
-def main(options, args):
-
-    # read slit positions from region file
-    regdata = read_region_file(options.regionfile)
-
-    # bias subtract, combine and extract regions
-    hdulst = reconstruct_image(args[0], args[1], regdata)
-
-    # Writing the output fits file
-    hdulst.writeto(options.outputfile)
-
-if __name__ == '__main__':
-    # Parse command line options with optparse module
-    from optparse import OptionParser
-
-    usage = "usage: %prog [options] ch1.fits ch2.fits"
-    optprs = OptionParser(usage=usage,
-                          version=('%%prog %s' % version))
-
-    optprs.add_option("-o", "--outputfile", dest="outputfile", metavar="NAME",
-                      default='output.fits',
-                      help="Specify output file name")
-    optprs.add_option("-r", "--regionfile", dest="regionfile", metavar="NAME",
-                      default='pseudoslits.reg',
-                      help="Specify region file name")
-    (options, args) = optprs.parse_args(sys.argv[1:])
-
-    main(options, args)

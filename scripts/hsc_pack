@@ -1,0 +1,38 @@
+#! /usr/bin/env python
+#
+import sys
+import os
+import pathlib
+
+from ginga.misc import log
+from naoj.hsc import hsc_dr
+
+logger = log.get_logger('hsc_pack', level=20, log_stderr=True)
+dr = hsc_dr.HyperSuprimeCamDR(logger=logger)
+
+path = sys.argv[1]
+logger.info("Examining frame '%s'..." % (path))
+directory, filename = os.path.split(sys.argv[1])
+frameid, ext = os.path.splitext(filename)
+
+exp_num = dr.get_exp_num(frameid)
+file_list = dr.exp_num_to_file_list(directory, exp_num)
+
+logger.info("Loading frames from exposure %d..." % (exp_num))
+images = []
+for path in file_list:
+    images.append(dr.load_image(path))
+
+logger.info("Building multi-HDU FITS file...")
+hdulist = dr.make_multi_hdu(images, compress=True)
+
+outname = 'hsc_%d_full.fits' % (exp_num)
+if len(sys.argv) > 2:
+    outfile = sys.argv[2]
+    p = pathlib.Path(outfile)
+    if p.is_dir():
+        outfile = os.path.join(outfile, outname)
+else:
+    outfile = outname
+logger.info("Writing file '%s'..." % (outfile))
+hdulist.writeto(outfile)

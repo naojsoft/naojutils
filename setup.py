@@ -28,7 +28,8 @@ setup(
     packages = ['naoj', 'naoj.cmap', 'naoj.spcam', 'naoj.hsc',
                 'naoj.focas'],
     package_data = { 'naoj.focas': ['ifu_regions/*.reg'] },
-    scripts = [],
+    scripts = ['scripts/focas_ifu_reconstruct_image',
+               'scripts/focas_ifu_biassub', 'scripts/focas_ifu_mkbiastemplate'],
     classifiers = [
         "License :: OSI Approved :: BSD License",
         "Operating System :: MacOS :: MacOS X",

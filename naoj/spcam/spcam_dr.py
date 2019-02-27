@@ -79,13 +79,9 @@ class SuprimeCamDR(object):
             ]
 
     def load_image(self, filepath):
-        from astropy.io import fits
-        with fits.open(filepath, 'readonly', memmap=False) as in_f:
-            hdu = in_f[0]
-            metadata = dict(header=hdu.header)
-            image = AstroImage.AstroImage(data_np=hdu.data, metadata=metadata,
-                                          logger=self.logger)
-            return image
+        image = AstroImage.AstroImage(logger=self.logger)
+        image.load_file(filepath)
+        return image
 
     def get_exp_num(self, frameid):
         frame = Frame(frameid)
@@ -564,11 +560,13 @@ class SuprimeCamDR(object):
             # create each image HDU
             data = numpy.copy(image.get_data().astype(numpy.uint16))
 
+            name = "DET-%s" % header['DET-ID']
             if not compress:
                 hdu = pyfits.ImageHDU(data=data)
             else:
                 hdu = pyfits.CompImageHDU(data=data,
-                                          compression_type='RICE_1')
+                                          compression_type='RICE_1',
+                                          name=name)
 
             for kwd in header.keys():
                 if kwd.upper() in self.imghdr_kwds:
@@ -580,12 +578,14 @@ class SuprimeCamDR(object):
             if not compress:
                 hdu.add_checksum()
 
-            det_id = int(hdu.header['DET-ID'])
+            det_id = int(header['DET-ID'])
             hdus[det_id] = hdu
             i += 1
 
         # stack HDUs in detector ID order
-        for i in range(self.num_ccds):
+        det_ids = list(hdus.keys())
+        det_ids.sort()
+        for i in det_ids:
             fitsobj.append(hdus[i])
 
         # fix up to FITS standard as much as possible

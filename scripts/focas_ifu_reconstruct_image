@@ -1,0 +1,56 @@
+#! /usr/bin/env python
+#
+"""
+USAGE: focas_ifu_reconstruct_image right.fits left.fits -o output.fits
+
+    right.fits: right image file name (smaller file number)
+    left.fits: left image file name (larger file number)
+    output_fits: output file name
+
+"""
+import sys
+from optparse import OptionParser
+
+from naoj.focas.reconstruct_image import reconstruct_image, version
+
+
+def main(options, args):
+
+    # read slit positions from region file
+    #regdata = read_region_file(options.regionfile)
+
+    # bias subtract, combine and extract regions
+    hdulst = reconstruct_image(args[0], args[1],
+                               template_pfx=options.template_pfx,
+                               regionfile=options.regionfile)
+
+    # Flatfielding if needed
+    if options.flatfile != None:
+        with fits.open(options.flatfile) as flathdulst:
+            normdata = flathdulst[0].data / np.mean(flathdulst[0].data)
+        hdulst[0].data = hdulst[0].data / normdata
+
+    # Writing the output fits file
+    hdulst.writeto(options.outputfile, overwrite=True)
+
+if __name__ == '__main__':
+    # Parse command line options with optparse module
+    usage = "usage: %prog [options] ch1.fits ch2.fits"
+    optprs = OptionParser(usage=usage,
+                          version=('%%prog %s' % version))
+
+    optprs.add_option("-o", "--outputfile", dest="outputfile", metavar="NAME",
+                      default='output.fits',
+                      help="Specify output file name")
+    optprs.add_option("-r", "--regionfile", dest="regionfile", metavar="NAME",
+                      default=None,
+                      help="Specify region file name")
+    optprs.add_option("-f", "--flatfile", dest="flatfile", metavar="NAME",
+                      default=None,
+                      help="Specify flat file name")
+    optprs.add_option("-t", "--template_pfx", dest="template_pfx", metavar="NAME",
+                      default='bias_template',
+                      help="Specify bias template prefix")
+    (options, args) = optprs.parse_args(sys.argv[1:])
+
+    main(options, args)

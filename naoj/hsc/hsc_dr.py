@@ -43,6 +43,44 @@ class HyperSuprimeCamDR(SuprimeCamDR):
         self.fov = fov
         self.frameid_offsets = frameid_offsets
 
+        # HSC keywords that should be added to the primary HDU
+        self.prihdr_kwds = [
+            'SIMPLE', 'EXTEND','DATE-OBS', 'UT', 'UT-STR', 'UT-END',
+            'HST', 'HST-STR', 'HST-END', 'LST', 'LST-STR', 'LST-END', 'MJD',
+            'TIMESYS', 'MJD-STR', 'MJD-END', 'ZD-STR', 'ZD-END', 'SECZ-STR',
+            'SECZ-END', 'AIRMASS', 'AZIMUTH', 'ALTITUDE', 'PROP-ID', 'OBSERVER',
+            'EXP-ID', 'DATASET', 'OBS-MOD', 'OBS-ALOC', 'DATA-TYP', 'OBJECT',
+            'OBSERVAT', 'TELESCOP', 'FOC-POS',
+            'TELFOCUS', 'FOC-VAL', 'FILTER01', 'EXPTIME', 'INSTRUME', 'INS-VER',
+            'WEATHER', 'SEEING', 'ADC-TYPE', 'ADC-STR', 'ADC-END', 'INR-STR',
+            'INR-END', 'DOM-WND', 'OUT-WND', 'DOM-TMP', 'OUT-TMP', 'DOM-HUM',
+            'OUT-HUM', 'DOM-PRS', 'OUT-PRS', 'EXP1TIME', 'COADD', 'M2-POS1',
+            'M2-POS2', 'M2-POS3', 'M2-ANG1', 'M2-ANG2', 'M2-ANG3', 'AUTOGUID',
+            'COMMENT', 'INST-PA',
+            ]
+
+        # HSC keywords that should be added to the image HDUs
+        self.imghdr_kwds = [
+            'SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'BZERO',
+            'BSCALE', 'BUNIT', 'BLANK', 'FRAMEID', 'EXP-ID', 'DETECTOR', 'DET-ID',
+            'DET-TMP', 'DET-TMED', 'DET-TMIN', 'DET-TMAX', 'GAIN', 'DET-VER',
+            'BIN-FCT1', 'BIN-FCT2',
+            'T_M2OFF1', 'T_M2OFF2', 'T_M2OFF3', 'T_PROG', 'T_PNTGID', 'T_PURPOS',
+            'T_DATSET', 'T_SHTDIR', 'T_AG', 'T_UFNAME', 'T_NFRAME', 'T_GAIN2',
+            'T_GAIN1', 'T_GAIN4', 'T_GAIN3', 'T_XFLIP', 'T_CCDID', 'T_CCDSN',
+            'T_YFLIP', 'T_CCDTV', 'T_CCDTM', 'T_HEDVER', 'T_CFGFIL', 'T_BEEID',
+            'T_SDOID', 'T_OSMN11', 'T_OSMX11', 'T_EFMN11', 'T_EFMX11', 'T_OSMN12',
+            'T_OSMX12', 'T_EFMN12', 'T_EFMX12', 'T_OSMN21', 'T_OSMX21', 'T_EFMN21',
+            'T_EFMX21', 'T_OSMN22', 'T_OSMX22', 'T_EFMN22', 'T_EFMX22', 'T_OSMN31',
+            'T_OSMX31', 'T_EFMN31', 'T_EFMX31', 'T_OSMN32', 'T_OSMX32', 'T_EFMN32',
+            'T_EFMX32', 'T_OSMN41', 'T_OSMX41', 'T_EFMN41', 'T_EFMX41', 'T_OSMN42',
+            'T_OSMX42', 'T_EFMN42', 'T_EFMX42',
+            'EQUINOX',  'CRVAL1',  'CRVAL2', 'CRPIX1', 'CRPIX2', 'CDELT1', 'CDELT2',
+            'LONGPOLE', 'CTYPE1', 'CTYPE2', 'CUNIT1', 'CUNIT2', 'WCS-ORIG',
+            'RADESYS', 'CD1_1', 'CD1_2', 'CD2_1', 'CD2_2', 'RA', 'DEC', 'RA2000',
+            'DEC2000',
+            ]
+
     # Until HSC FITS headers are fixed
     #
     def get_regions(self, image):
