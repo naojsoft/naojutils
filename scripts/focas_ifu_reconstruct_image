@@ -22,13 +22,8 @@ def main(options, args):
     # bias subtract, combine and extract regions
     hdulst = reconstruct_image(args[0], args[1],
                                template_pfx=options.template_pfx,
-                               regionfile=options.regionfile)
-
-    # Flatfielding if needed
-    if options.flatfile != None:
-        with fits.open(options.flatfile) as flathdulst:
-            normdata = flathdulst[0].data / np.mean(flathdulst[0].data)
-        hdulst[0].data = hdulst[0].data / normdata
+                               regionfile=options.regionfile,
+                               flatfile=options.flatfile)
 
     # Writing the output fits file
     hdulst.writeto(options.outputfile, overwrite=True)

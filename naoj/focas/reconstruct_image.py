@@ -32,7 +32,8 @@ def read_region_file(region_file):
     return regdata
 
 def reconstruct_image(fitsfile_ch1, fitsfile_ch2,
-                      template_pfx='bias_template', regionfile=None):
+                      template_pfx='bias_template', regionfile=None,
+                      flatfile=None):
     global regions
 
     # subtract bias and combine channels
@@ -105,6 +106,12 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2,
     newhdr['CD1_2'] = newrot[0, 1] * yscale
     newhdr['CD2_1'] = newrot[1, 0] * xscale
     newhdr['CD2_2'] = newrot[1, 1] * yscale
+
+    # Flatfielding if needed
+    if flatfile is not None:
+        with fits.open(flatfile) as flathdulst:
+            normdata = flathdulst[0].data / np.mean(flathdulst[0].data)
+        hdulst[0].data = hdulst[0].data / normdata
 
     return hdulst
 

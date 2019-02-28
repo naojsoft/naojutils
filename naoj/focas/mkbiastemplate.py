@@ -6,8 +6,10 @@ from astropy.io import fits
 import os
 from . import focasifu as fi
 
-def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False):
-    hdulist = fits.open(rawdatadir + filename)
+def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False,
+                   outputdir='.'):
+    path = os.path.join(rawdatadir, filename)
+    hdulist = fits.open(path)
     detid = hdulist[0].header['DET-ID']
     scidata = hdulist[0].data
     hdulist.close()
@@ -17,7 +19,7 @@ def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False):
         clipped, low, upp = sigmaclip(scidata[:,i], low=nsigma, high=nsigma)
         average1d[i] = np.mean(clipped)
 
-    outfilename = 'bias_template'+str(detid)+'.fits'
+    outfilename = os.path.join(outputdir, 'bias_template'+str(detid)+'.fits')
     if os.path.isfile(outfilename) and not overwrite:
         print(('File exists. '+outfilename))
         return
@@ -30,11 +32,15 @@ def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False):
 
     return
 
-def MkTwoBiasTemplate(filename, rawdatadir='', overwrite = False):
-    MkBiasTemplate(filename, rawdatadir=rawdatadir, overwrite=overwrite)
-    basename = fits.getval(rawdatadir + filename, 'FRAMEID')
+def MkTwoBiasTemplate(filename, rawdatadir='', overwrite=False,
+                      outputdir='.'):
+    MkBiasTemplate(filename, rawdatadir=rawdatadir, overwrite=overwrite,
+                   outputdir=outputdir)
+    path = os.path.join(rawdatadir, filename)
+    basename = fits.getval(path, 'FRAMEID')
     filename2 = str('FCSA%08d.fits'%(int(basename[4:])+1))
-    MkBiasTemplate(filename2, rawdatadir=rawdatadir, overwrite=overwrite)
+    MkBiasTemplate(filename2, rawdatadir=rawdatadir, overwrite=overwrite,
+                   outputdir=outputdir)
     return
 
 if __name__ == '__main__':
