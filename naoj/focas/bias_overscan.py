@@ -82,7 +82,7 @@ def bias_subtraction(inhdl, template_pfx):
     ovs = overscan[binfac1]
 
     # Read the template file
-    bias_template_hdl = fits.open(template_pfx+str(detid)+'.fits')
+    bias_template_hdl = fits.open(template_pfx+str(binfac1)+str(detid)+'.fits')
     if fi.check_version(bias_template_hdl):
         bias_template_data = bias_template_hdl[0].data
         bias_template_hdl.close()

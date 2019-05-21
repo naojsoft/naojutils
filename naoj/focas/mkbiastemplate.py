@@ -10,6 +10,8 @@ def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False,
                    outputdir='.'):
     path = os.path.join(rawdatadir, filename)
     hdulist = fits.open(path)
+    binfac1 = hdulist[0].header['BIN-FCT1']  # X direction on DS9
+    binfac2 = hdulist[0].header['BIN-FCT2']  # Y direction on DS9
     detid = hdulist[0].header['DET-ID']
     scidata = hdulist[0].data
     hdulist.close()
@@ -19,7 +21,7 @@ def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False,
         clipped, low, upp = sigmaclip(scidata[:,i], low=nsigma, high=nsigma)
         average1d[i] = np.mean(clipped)
 
-    outfilename = os.path.join(outputdir, 'bias_template'+str(detid)+'.fits')
+    outfilename = os.path.join(outputdir, 'bias_template'+str(binfac1)+str(detid)+'.fits')
     if os.path.isfile(outfilename) and not overwrite:
         print(('File exists. '+outfilename))
         return
