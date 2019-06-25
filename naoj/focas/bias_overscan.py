@@ -64,8 +64,8 @@ overscan[4] = np.asarray([
     ])
 
 def bias_subtraction(inhdl, template_pfx):
-    print(('\t Bias subtracting for the frame ID, %s.'
-          %inhdl[0].header['FRAMEID']))
+    #print(('\t Bias subtracting for the frame ID, %s.'
+    #      %inhdl[0].header['FRAMEID']))
     # Bias subtraction
     scidata = inhdl[0].data
 
@@ -81,17 +81,6 @@ def bias_subtraction(inhdl, template_pfx):
     # Get the appropriate over scan region area
     ovs = overscan[binfac1]
 
-    # Read the template file
-    bias_template_hdl = fits.open(template_pfx+str(binfac1)+str(detid)+'.fits')
-    if fi.check_version(bias_template_hdl):
-        bias_template_data = bias_template_hdl[0].data
-        bias_template_hdl.close()
-    else:
-        bias_template_hdl.close()
-        return inhdl, False
-
-    #bias_template_data = fits.getdata(template_pfx+str(detid)+'.fits')
-
     # Discriminating whether the flame is for left or right.
     # detid = 1 => right image
     # detid = 2 => left image
@@ -99,6 +88,23 @@ def bias_subtraction(inhdl, template_pfx):
         k = 4
     else:
         k = 0
+
+    # Checking the bias template file and making bias 1D data
+    bias_template_name = template_pfx+str(binfac1)+str(detid)+'.fits'
+    use_template = False
+    if os.path.isfile(bias_template_name):
+        bias_template_hdl = fits.open(bias_template_name)
+        if fi.check_version(bias_template_hdl):
+            bias_template_data = bias_template_hdl[0].data
+            use_template = True
+        bias_template_hdl.close()
+    
+    if not use_template:
+        #print('!!! There is no bias template file, '+bias_template_name+'.')
+        #print('!!! Top overscan region is refered as bias.')
+        bias_template_data = \
+                np.mean(scidata[scidata.shape[0]-13:scidata.shape[0],:],
+                        axis=0)
 
     # Subtracting the bias pattern scaled by the derived sum.
     bsdata = np.zeros((scidata.shape[0], scidata.shape[1]), dtype=np.float32)
@@ -110,9 +116,11 @@ def bias_subtraction(inhdl, template_pfx):
             ovlevel = np.mean(scidata[i-2:i+3,ovs[j,0]-1:ovs[j,1]])
             ovlevel = ovlevel + \
                       np.mean(scidata[i-2:i+3,ovs[j,4]-1:ovs[j,5]])
-            bsdata[i,ovs[j,0]-1:ovs[j,5]] = scidata[i,ovs[j,0]-1:ovs[j,5]] - \
-                    bias_template_data[ovs[j,0]-1:ovs[j,5]]/template_level*ovlevel
-
+            bsdata[i,ovs[j,0]-1:ovs[j,5]] = \
+                        scidata[i,ovs[j,0]-1:ovs[j,5]] - \
+                        bias_template_data[ovs[j,0]-1:ovs[j,5]] / \
+                        template_level * ovlevel
+        
     # Creating HDU data
     outhdu = fits.PrimaryHDU(data=bsdata)
     outhdl = fits.HDUList([outhdu])
@@ -133,11 +141,11 @@ def bias_subtraction(inhdl, template_pfx):
     return outhdl, True
 
 def remove_overscan(inhdl):
-    print(('\t Overscan region removing for %s.'%inhdl[0].header['FRAMEID']))
+    #print(('\t Overscan region removing for %s.'%inhdl[0].header['FRAMEID']))
 
     # Checking the version consistency
-    #if not fi.check_version(inhdl):
-    #    return inhdl, False
+    if not fi.check_version(inhdl):
+        return inhdl, False
 
     # Overscan region removing
     scidata = inhdl[0].data
@@ -154,8 +162,8 @@ def remove_overscan(inhdl):
     # Trim Y range
     yrange = [[51, 4220], # for 1 bin
               [26, 2110], # for 2 bin
-              [0,0,0],       # for 3 bin; currently dummy
-              [0,0,0]]       # for 4 bin; currently dummy
+              [17, 1406], # for 3 bin
+              [13,1055]]  # for 4 bin
 
     # Discriminating whether the flame is for left or right.
     topovlevel = 0.0
@@ -184,15 +192,17 @@ def remove_overscan(inhdl):
     outhdl = fits.HDUList([outhdu])
     outhdl[0].header = inhdr
     outhdl[0].header['BUNIT'] = 'electrons'
-    outhdl[0].header['TRM_Y1'] = (yrange[binfac2-1][0]+1, 'Y start of adopped area for trimming')
-    outhdl[0].header['TRM_Y2'] = (yrange[binfac2-1][1], 'Y end of adopped area for trimming')
+    outhdl[0].header['TRM_Y1'] = (yrange[binfac2-1][0]+1,
+                                  'Y start of adopped area for trimming')
+    outhdl[0].header['TRM_Y2'] = (yrange[binfac2-1][1],
+                                  'Y end of adopped area for trimming')
 
     return outhdl, True
 
 
 def restore_badpix(inhdl):
     # Bad pixel correction
-    print(('\t Restoring bad pixels for %s.'%inhdl[0].header['FRAMEID']))
+    #print('\t Restoring bad pixels for %s.'%inhdl[0].header['FRAMEID'])
 
     # Checking the version consistency
     if not fi.check_version(inhdl):
@@ -224,7 +234,7 @@ def stack_data(hdl_right, hdl_left):
     # hdl_right: right image
     # hdl_left: left image
     #
-    print('\t Stacking the frames.')
+    #print('\t Stacking the frames.')
     binfac1 = hdl_right[0].header['BIN-FCT1']
 
     # Set the start X of right half image
@@ -249,7 +259,7 @@ def stack_data(hdl_right, hdl_left):
 
 
 def correct_header(hdl):
-    print('\t Correcting the header information.')
+    #print('\t Correcting the header information.')
     hdr=hdl[0].header
     # Original keys are renamed.
     #hdr['OCUNIT1'] = (hdr['CUNIT1'], 'Original CUNIT1')
@@ -293,8 +303,8 @@ def correct_header(hdl):
 
 def bias_overscan(ifname, rawdatadir='', template_pfx='bias_template',
                   overwrite=False):
-    print('\n#############################')
-    print('bias subtraction, overscan region removing, bad pixel correction, hedear correction')
+    #print('\n#############################')
+    #print('bias subtraction, overscan region removing, bad pixel correction, hedear correction')
 
     basename = fits.getval(rawdatadir+ifname, 'FRAMEID')
     ovname = basename+'.ov.fits'

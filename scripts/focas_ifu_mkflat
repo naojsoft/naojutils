@@ -1,0 +1,35 @@
+#! /usr/bin/env python
+#
+"""
+USAGE: focas_ifu_mkflat -o output.fits chip1.fits chip2.fits
+
+"""
+import sys
+import argparse
+
+from naoj.focas.mkflat import mkflat
+
+
+def main(options, args):
+
+    out_f, filename = mkflat(options.fits1, options.fits2,
+                             out_file=options.outputfile)
+
+    # Writing the output fits file
+    if out_f is not None:
+        out_f.writeto(filename, overwrite=True)
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='This is the script for'
+                                     ' making a flat image.')
+    parser.add_argument('fits1', help='Input FITS file for Chip 1')
+    parser.add_argument('fits2', help='Input FITS file for Chip 2')
+    parser.add_argument("-o", "--outputfile", dest="outputfile", metavar="NAME",
+                        default=None,
+                        help="Specify output file name")
+
+    options, args = parser.parse_known_args()
+
+    main(options, args)

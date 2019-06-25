@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 #
 """
-USAGE: focas_ifu_reconstruct_image right.fits left.fits -o output.fits
+USAGE: focas_ifu_reconstruct_image right.fits left.fits -o output.fits [options]
 
     right.fits: right image file name (smaller file number)
     left.fits: left image file name (larger file number)
@@ -9,7 +9,7 @@ USAGE: focas_ifu_reconstruct_image right.fits left.fits -o output.fits
 
 """
 import sys
-from optparse import OptionParser
+import argparse
 
 from naoj.focas.reconstruct_image import reconstruct_image, version
 
@@ -23,7 +23,9 @@ def main(options, args):
     hdulst = reconstruct_image(args[0], args[1],
                                template_pfx=options.template_pfx,
                                regionfile=options.regionfile,
-                               flatfile=options.flatfile)
+                               flatfile=options.flatfile,
+                               shift_flg=options.shift_flg,
+                               smooth_flg=options.smooth_flg)
 
     # Writing the output fits file
     hdulst.writeto(options.outputfile, overwrite=True)
@@ -31,21 +33,27 @@ def main(options, args):
 if __name__ == '__main__':
     # Parse command line options with optparse module
     usage = "usage: %prog [options] ch1.fits ch2.fits"
-    optprs = OptionParser(usage=usage,
-                          version=('%%prog %s' % version))
+    parser = argparse.ArgumentParser(description='This is the script for'
+                                     ' making a reconstructed IFU image.')
 
-    optprs.add_option("-o", "--outputfile", dest="outputfile", metavar="NAME",
-                      default='output.fits',
-                      help="Specify output file name")
-    optprs.add_option("-r", "--regionfile", dest="regionfile", metavar="NAME",
-                      default=None,
-                      help="Specify region file name")
-    optprs.add_option("-f", "--flatfile", dest="flatfile", metavar="NAME",
-                      default=None,
-                      help="Specify flat file name")
-    optprs.add_option("-t", "--template_pfx", dest="template_pfx", metavar="NAME",
-                      default='bias_template',
-                      help="Specify bias template prefix")
-    (options, args) = optprs.parse_args(sys.argv[1:])
+    parser.add_argument("-o", "--outputfile", dest="outputfile", metavar="NAME",
+                        default='output.fits',
+                        help="Specify output file name")
+    parser.add_argument("-r", "--regionfile", dest="regionfile", metavar="NAME",
+                        default=None,
+                        help="Specify region file name")
+    parser.add_argument("-f", "--flatfile", dest="flatfile", metavar="NAME",
+                        default=None,
+                        help="Specify flat file name")
+    parser.add_argument("-t", "--template_pfx", dest="template_pfx", metavar="NAME",
+                        default='bias_template',
+                        help="Specify bias template prefix")
+    parser.add_argument("--smooth", dest="smooth_flg", default=False,
+                        action="store_true",
+                        help="Do smoothing on reconstructed IFU image (default OFF)")
+    parser.add_argument("--noshift", dest="shift_flg", default=True,
+                        action="store_false",
+                        help="Don't shift on reconstructed IFU image (default ON)")
+    (options, args) = parser.parse_known_args(sys.argv[1:])
 
     main(options, args)
