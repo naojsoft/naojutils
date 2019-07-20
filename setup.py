@@ -26,7 +26,7 @@ setup(
     keywords = "NAOJ, subaru, telescope, instrument, data",
     url = "http://naojsoft.github.com/naojutils",
     packages = ['naoj', 'naoj.cmap', 'naoj.spcam', 'naoj.hsc',
-                'naoj.focas'],
+                'naoj.focas', 'naoj.util'],
     package_data = { 'naoj.focas': ['ifu_regions/*.reg'] },
     scripts = ['scripts/focas_ifu_reconstruct_image',
                'scripts/focas_ifu_biassub', 'scripts/focas_ifu_mkbiastemplate',
