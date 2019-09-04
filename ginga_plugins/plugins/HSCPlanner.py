@@ -22,7 +22,6 @@ from ginga import GingaPlugin
 from ginga.gw import Widgets
 from ginga.misc import Bunch, Future
 from ginga.util import wcs, dp, catalog
-from ginga.util.six.moves import map
 
 from naoj.hsc import ccd_info, sdo
 
@@ -583,22 +582,26 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         paths = self.get_paths(ctr_ra_deg, ctr_dec_deg, info)
 
         start, stop, dither_positions = self.get_dither_positions()
-        dither = list(map(lambda pt: image.radectopix(pt[0], pt[1]),
-                          dither_positions))
+        dither = [image.radectopix(pt[0], pt[1]) for pt in dither_positions]
         dither = numpy.array(dither)
 
         ## only_ccds_in_dithers = self.w.only_dithers.get_state()
 
         crdmap = self.fitsimage.get_coordmap('data')
         for key, path in paths:
-            points = list(map(lambda pt: image.radectopix(pt[0], pt[1]), path))
+            points = [image.radectopix(pt[0], pt[1]) for pt in path]
             points = numpy.array(points)
 
+            showfill = False
             if 'color' in info[key]:
                 color = info[key]['color']
             else:
                 color = 'lightgreen'
-            p = self.dc.Polygon(points, color=color, showcap=False)
+            if color == 'red':
+                showfill = True
+            p = self.dc.Polygon(points, color=color, fill=showfill,
+                                fillcolor='red', fillalpha=0.4,
+                                showcap=False)
 
             # hack to be able to check containment before object is on
             # the canvas

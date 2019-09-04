@@ -6,8 +6,8 @@ p_path = os.path.split(__file__)[0]
 
 def setup_hscplanner():
     spec = Bunch(path=os.path.join(p_path, 'HSCPlanner.py'),
-                 module='HSCPlanner', klass='HSCPlanner',
-                 workspace='dialogs')
+                 module='HSCPlanner', klass='HSCPlanner', tab='HSCPlanner',
+                 category='Planning', workspace='dialogs', ptype='local')
     return spec
 
 # END
