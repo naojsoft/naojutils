@@ -15,7 +15,7 @@ setup(
     author = "OCS Group, Software Division, Subaru Telescope, NAOJ",
     license = "BSD",
     url = "http://naojsoft.github.com/naojutils",
-    install_requires = ["ginga>=2.6.2"],
+    install_requires = ["ginga>=2.7.2"],
     packages = find_packages(),
     include_package_data = True,
     package_data = {},
