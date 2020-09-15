@@ -1,17 +1,26 @@
 # -*- coding: utf-8 -*-
 # Shinobu Ozaki
+#
+# 2019/06/30:
+# X shift is calculated based on the flexure data.
+# 'focasifu' module is no longer imported.
+
+
 from __future__ import absolute_import
 import sys, os
 import re
 import numpy as np
 from astropy.io import fits
 from scipy.ndimage.interpolation import shift
+import math
+from . import focasifu as fi
 
 # local imports
 from . import biassub as bs
-from . import focasifu as fi
 version = "20180226.0"
-
+xrange = {1: [11, 148],
+          2: [6, 74],
+          4: [4, 36]}
 
 # Transfering FITS keywords
 transfer_kwds = ['EXP-ID', 'FOC-VAL', 'OBJECT', 'EXPTIME',
@@ -41,32 +50,45 @@ def read_region_file(region_file):
 
     return regdata
 
-def flatfielding(data, flat, binfac1, shift_flg=True):
-    # data: image data
-    # flat: flat data
+def get_shift_flex(hdl):
+    hdr = hdl[0].header
+    el = hdr['ALTITUDE']
+    insrot = hdr['INSROT']
+    binfac1 = hdr['BIN-FCT1'] # X direction on DS9
+    binfac2 = hdr['BIN-FCT2'] # Y direction on DS9
 
-    xrange = {1: [11, 148],
-              2: [6, 74],
-              4: [4, 36]}
+    el = math.radians(el)
+    insrot = math.radians(insrot)
 
-    xshift = np.zeros(data.shape[0])
-    for i in range(len(xshift)):
-        xshift[i] = fi.cross_correlate(data[i,:], flat[i,:], sep=0.1)
-    xshift_std = np.std(xshift)
-    xshift_ave = np.average(xshift)
-    if xshift_std != 0.0 and xshift_std < 0.3 and shift_flg:
-        shifted_flat = shift(flat, (0.0, xshift_ave), order=5,
-                                      mode='nearest')
-        temp = data / shifted_flat * np.average(shifted_flat)
-        xs = xrange[binfac1][0] + int(xshift_ave+0.5)
-        xe = xrange[binfac1][1] + int(xshift_ave+0.5)
-        flatted_data = temp[:, xs:xe]
-        is_shifted = True
-    else:
-        flatted_data =  data / flat * np.average(flat)
-        is_shifted = False
+    a = -6.98763
+    b = -0.299919
+    c = 6.65883
+    d = -16.2355
+    e = -0.0359595
+    f = 2.77652
 
-    return flatted_data, xshift_ave, xshift_std, is_shifted
+    dx = a*math.cos(el)*math.cos(insrot+b)
+    #dy = c*math.cos(el)*math.sin(insrot+d)+e*el+f
+
+    dx = dx/binfac1
+    #dy = dy/binfac2
+    return dx
+
+def get_shift_corr(hdl, flat):
+    # if object is on Ch10, this function does not work well.
+    data = hdl[0].data
+    dx = fi.cross_correlate(data[9,:], flat[9,:], sep=0.01, fit=False)
+    return dx
+
+def flatfielding(hdl, flat):
+    # Shifting data
+    dx = get_shift_flex(hdl)
+    shifted_data = shift(hdl[0].data, (0.0, -dx), order=5, mode='nearest')
+
+    # Flat fielding
+    flatted_data = shifted_data / flat * np.average(flat)
+
+    return flatted_data, dx
 
 
 def creating_header(hdl, outhdl):
@@ -92,7 +114,7 @@ def creating_header(hdl, outhdl):
     binfct1 = hdr['BIN-FCT1']
     newrot = rot * cd_rot
     xscale = 0.104 / 3600.0 * binfct1
-    yscale = 0.43 / 3600.0 / int(4 / binfct1)
+    yscale = -0.43 / 3600.0 / int(4 / binfct1)
     outhdr['CD1_1'] = newrot[0, 0] * xscale
     outhdr['CD1_2'] = newrot[0, 1] * yscale
     outhdr['CD2_1'] = newrot[1, 0] * xscale
@@ -101,7 +123,7 @@ def creating_header(hdl, outhdl):
     return
 
 
-def get_binneddata(hdl, regionfile=None):
+def integrate(hdl, regionfile=None):
     scidata = hdl[0].data
     # Getting the binning information
     hdr = hdl[0].header
@@ -122,13 +144,19 @@ def get_binneddata(hdl, regionfile=None):
 
     # Factor 'int(4/binfac1)' is to match Y scale to X scale in the
     # reconstructed image.
-    binned_data = np.zeros((reg.shape[0], xw), np.float32)
-    for j in range(reg.shape[0]):
+    # integrated_data[0,:] is CH24, integrated_data[23,:] is Ch01.
+    integrated_data = np.zeros((reg.shape[0], xw), np.float32)
+    for j in range(reg.shape[0]-1,-1,-1):
         xs = int(reg[j, 0] - reg[j, 2] / 2.0)
         ys = int(reg[j, 1] - reg[j, 3] / 2.0)
-        binned_data[j, :] = np.sum(scidata[ys:ys+yw, xs:xs+xw], axis=0)
+        integrated_data[j, :] = np.sum(scidata[ys:ys+yw, xs:xs+xw], axis=0)
 
-    return binned_data
+    # creating HDU list of the reconstruct image
+    integrated_hdu = fits.PrimaryHDU(data=integrated_data)
+    integrated_hdl = fits.HDUList([integrated_hdu])
+    integrated_hdl[0].header = hdr
+
+    return integrated_hdl
 
 
 def reconstruct_image(fitsfile_ch1, fitsfile_ch2,
@@ -140,27 +168,20 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2,
     hdr = hdl[0].header
     binfac1 = hdr['BIN-FCT1'] # X direction on DS9
 
-    # Get binned data
-    binned_data = get_binneddata(hdl, regionfile=regionfile)
+    # Get integrated data
+    integrated_hdl = integrate(hdl, regionfile=regionfile)
 
-    # Flatfielding if needed
     if flatfile is not None:
         with fits.open(flatfile) as flathdulst:
-            normdata = flathdulst[0].data / np.mean(flathdulst[0].data)
-        flatted_data, xshift_ave, xshift_std, is_shifted = \
-                            flatfielding(binned_data, normdata, binfac1,
-                                         shift_flg=shift_flg)
+            flatted_data, xshift =  flatfielding(integrated_hdl, flathdulst[0].data)
         is_flatted = True
     else:
-        flatted_data = binned_data
-        xshift_ave = 0.0
-        xshift_std = 0.0
-        is_shifted = False
+        flatted_data = integrated_hdl[0].data
         is_flatted = False
 
     # creating output data array
     itnum = int(4/binfac1)
-    recon_im = np.zeros((flatted_data.shape[0]*itnum, flatted_data.shape[1]),
+    recon_im = np.zeros((flatted_data.shape[0]*itnum+1, flatted_data.shape[1]),
                         dtype=np.float32)
 
     # creating HDU list of the reconstruct image
@@ -169,32 +190,34 @@ def reconstruct_image(fitsfile_ch1, fitsfile_ch2,
 
     # creating header information
     outhdr = outhdl[0].header
-    outhdr['XSHFTAVE'] = (xshift_ave, 'Average xshift of flat image')
-    outhdr['XSHFTSTD'] = (xshift_std,
-                          'Standard deviation of xshift for all slices')
-    outhdr['ISSHFTED'] = (is_shifted, 'True: flat image is shifted')
+    if is_flatted:
+        outhdr['XSHFT'] = (xshift, 'Xshift value of flat image (pix)')
     outhdr['ISFLATED'] = (is_flatted, 'True: Flat fielding is applied')
     creating_header(hdl, outhdl)
 
-    ## Ch24 (Sky)
+    # Inputing the output data
+    ymax = flatted_data.shape[0]-1
+    ## Ch01
     for i in range(itnum):
-        recon_im[i,:] = flatted_data[0,:]
+        recon_im[i,:] = \
+                        flatted_data[ymax,:]
 
-    ## Ch23 - Ch02
-    for j in range(flatted_data.shape[0]-1):
+    ## Ch02 - Ch23
+    for j in range(1, flatted_data.shape[0]-1):
         for i in range(itnum):
             if smooth_flg:
                 recon_im[j*itnum + i,:] = \
-                    ((itnum-i)*flatted_data[j,:] + i*flatted_data[j+1,:]) \
+                    ((itnum-i)*flatted_data[ymax-j,:] + i*flatted_data[ymax-j-1,:]) \
                     / itnum
             else:
-                recon_im[j*itnum + i,:] = flatted_data[j,:]
+                recon_im[j*itnum + i,:] = flatted_data[ymax - j,:]
 
-    ## Ch01
+    ## Border line
+    recon_im[ymax*itnum,:] = np.nan
+
+    ## Ch24 (Sky)
     for i in range(itnum):
-        recon_im[(flatted_data.shape[0]-1)*itnum+i,:] = \
-                        flatted_data[flatted_data.shape[0]-1,:]
-
+        recon_im[ymax*itnum+i+1,:] = flatted_data[0,:]
 
     return outhdl
 

@@ -1,28 +1,26 @@
 #!/usr/bin/env python
+#
+# 2019/06/30:
+# Modification for the change of 'get_binneddata' function to 'integrate'
+#   function in 'reconstruct_image.py'
+#
 
 import numpy as np
 from astropy.io import fits
 
 from . import biassub as bs
-from .reconstruct_image import get_binneddata, creating_header
+from .reconstruct_image import integrate
 
 
 def mkflat(fitsfile1, fitsfile2, out_file=None):
     # Filter dictionary
-    filter_dict={'SCFCFLBI01':'I','SCFCFLBR01':'R'}
+    filter_dict={'SCFCFLBI01':'I','SCFCFLBR01':'R','SCFCFLBV01':'V'}
 
     # subtract bias and combine channels
     hdl = bs.biassub(fitsfile1, fitsfile2)
 
-    # Get binned data
-    binned_data = get_binneddata(hdl)
-
-    # creating HDU list of the reconstruct image
-    outhdu = fits.PrimaryHDU(data=binned_data)
-    outhdl = fits.HDUList([outhdu])
-
-    # creating header information
-    creating_header(hdl, outhdl)
+    # Get integrated data
+    integrated_hdl = integrate(hdl)
 
     # creatign an output file name if it is not given.
     filter = []
@@ -40,4 +38,4 @@ def mkflat(fitsfile1, fitsfile2, out_file=None):
 
     hdl.close()
 
-    return outhdl, out_file
+    return integrated_hdl, out_file
