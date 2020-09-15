@@ -30,7 +30,7 @@ setup(
     package_data = { 'naoj.focas': ['ifu_regions/*.reg'] },
     scripts = ['scripts/focas_ifu_reconstruct_image',
                'scripts/focas_ifu_biassub', 'scripts/focas_ifu_mkbiastemplate',
-               'scripts/focas_ifu_mkflat'],
+               'scripts/focas_ifu_mkflat', 'scripts/hsc_pack'],
     classifiers = [
         "License :: OSI Approved :: BSD License",
         "Operating System :: MacOS :: MacOS X",

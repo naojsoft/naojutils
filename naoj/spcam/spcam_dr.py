@@ -88,6 +88,21 @@ class SuprimeCamDR(object):
         exp_num = (frame.count // self.num_frames) * self.num_frames
         return exp_num
 
+    def exp_num_to_frame_list(self, exp_num):
+        frame = Frame()
+        frame.inscode = self.inscode
+        frame.frametype = 'A'
+        frame.prefix = '0'
+        frame.number = 0
+        frame.add(exp_num)
+
+        res = []
+        for off in self.frameid_offsets:
+            fr = frame.copy()
+            fr.add(off)
+            res.append(str(fr))
+        return res
+
     def exp_num_to_file_list(self, directory, exp_num):
         frame = Frame()
         frame.directory = directory
