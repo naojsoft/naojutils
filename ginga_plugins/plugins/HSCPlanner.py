@@ -519,10 +519,10 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         self.resume()
 
     def pause(self):
-        self.canvas.ui_setActive(False)
+        self.canvas.ui_set_active(False)
 
     def resume(self):
-        self.canvas.ui_setActive(True)
+        self.canvas.ui_set_active(True)
         self.fv.show_status("")
 
     def stop(self):
@@ -531,7 +531,7 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
             self.fitsimage.delete_object_by_tag(self.layertag)
         except:
             pass
-        self.canvas.ui_setActive(False)
+        self.canvas.ui_set_active(False)
         self.fv.show_status("")
 
     def redo(self):
@@ -684,9 +684,9 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
         self.fitsimage.set_image(image)
 
     def _set_radec(self, ra_deg, dec_deg):
-        ra_txt = wcs.raDegToString(ra_deg)
+        ra_txt = wcs.ra_deg_to_str(ra_deg)
         self.w.ra.set_text(ra_txt)
-        dec_txt = wcs.decDegToString(dec_deg)
+        dec_txt = wcs.dec_deg_to_str(dec_deg)
         self.w.dec.set_text(dec_txt)
         return ra_txt, dec_txt
 
@@ -720,8 +720,8 @@ class HSCPlanner(GingaPlugin.LocalPlugin):
             ht = deg*60.0 + float(mn) + sec/60.0
 
             # coordinates
-            ra_txt = wcs.raDegToString(self.ctr_ra_deg)
-            dec_txt = wcs.decDegToString(self.ctr_dec_deg)
+            ra_txt = wcs.ra_deg_to_str(self.ctr_ra_deg)
+            dec_txt = wcs.dec_deg_to_str(self.ctr_dec_deg)
 
             # these are the params to DSS
             params = dict(ra=ra_txt, dec=dec_txt, width=wd, height=ht)
