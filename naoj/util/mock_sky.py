@@ -137,3 +137,48 @@ def mk_star_image(arr, num_stars, amp_rng=None, sdev=None,
         add_star(arr, pos, amp, ellip=ellip, blur=blur)
 
     return locs
+
+
+def _rebin(arr, new_shape):
+    shape = (new_shape[0], arr.shape[0] // new_shape[0],
+             new_shape[1], arr.shape[1] // new_shape[1])
+    return arr.reshape(shape).sum(-1).sum(1)
+
+
+def rebin(arr, factor):
+    """
+    Rebin a 2D array.
+
+    Parameters
+    ----------
+    arr : ndarray
+        2D array with an image
+
+    factor : int
+        1, 2, 4, 8 ...
+
+    Returns
+    -------
+    arr2 : ndarray
+        Rebinned output array
+    """
+    # iteratively rebin by 2 to achieve the factor
+    while factor > 1:
+        ht, wd = arr.shape
+        # pad with an extra pixel on wd, ht if needed to rebin by 2
+        xtra_ht, xtra_wd = ht % 2, wd % 2
+
+        if xtra_ht + xtra_wd > 0:
+            arr2 = np.zeros((ht + xtra_ht, wd + xtra_wd), dtype=arr.dtype)
+            arr2[0:ht, 0:wd] = arr
+            # TODO: fill extra pixels?
+            arr = arr2
+            ht, wd = arr.shape
+
+        new_ht, new_wd = ht // 2, wd // 2
+        new_shape = (new_ht, new_wd)
+
+        arr = _rebin(arr, new_shape)
+        factor /= 2
+
+    return arr
