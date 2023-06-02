@@ -14,7 +14,8 @@ from .reconstruct_image import integrate
 
 def mkflat(fitsfile1, fitsfile2, out_file=None):
     # Filter dictionary
-    filter_dict={'SCFCFLBI01':'I',
+    filter_dict={'SCFCFLBB01':'B',
+                 'SCFCFLBI01':'I',
                  'SCFCFLBR01':'R',
                  'SCFCFLBV01':'V',
                  'SCFCFLBSZ1':'Z'}
