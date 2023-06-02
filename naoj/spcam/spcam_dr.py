@@ -1,7 +1,7 @@
 #
 # spcam_dr.py -- Suprime-Cam data processing routines
 #
-# Eric Jeschke (eric@naoj.org)
+# E. Jeschke
 #
 # This is open-source software licensed under a BSD license.
 # Please see the file LICENSE.txt for details.
@@ -18,8 +18,7 @@ from ginga.misc import Bunch, log
 from ginga.util import dp
 from ginga.util import mosaic, wcs
 
-# local package imports
-from ..frame import Frame
+from g2base.astro.frame import Frame
 
 
 class SuprimeCamDR(object):
