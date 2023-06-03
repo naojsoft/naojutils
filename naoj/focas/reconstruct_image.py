@@ -6,7 +6,6 @@
 # 'focasifu' module is no longer imported.
 
 
-from __future__ import absolute_import
 import sys, os
 import re
 import numpy as np

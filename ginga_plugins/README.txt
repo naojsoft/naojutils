@@ -5,7 +5,7 @@ science image viewer.
 
 INSTALLATION (via setuptools)
 ------------
-$ python setup.py install
+$ pip install .   (in this folder)
 
 and start ginga with
 

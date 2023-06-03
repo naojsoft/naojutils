@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from __future__ import absolute_import
-from __future__ import print_function
 import numpy as np
 import os
 from astropy.io import fits
@@ -98,7 +96,7 @@ def bias_subtraction(inhdl, template_pfx):
             bias_template_data = bias_template_hdl[0].data
             use_template = True
         bias_template_hdl.close()
-    
+
     if not use_template:
         #print('!!! There is no bias template file, '+bias_template_name+'.')
         #print('!!! Top overscan region is refered as bias.')
@@ -120,7 +118,7 @@ def bias_subtraction(inhdl, template_pfx):
                         scidata[i,ovs[j,0]-1:ovs[j,5]] - \
                         bias_template_data[ovs[j,0]-1:ovs[j,5]] / \
                         template_level * ovlevel
-        
+
     # Creating HDU data
     outhdu = fits.PrimaryHDU(data=bsdata)
     outhdl = fits.HDUList([outhdu])
