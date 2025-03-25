@@ -414,8 +414,10 @@ def calc_possible_azimuths(cr_start, cr_stop, obs_lat_deg):
             raise ValueError(f"start quadrant '{start_quad}' type not recognized")
 
 
-def calc_rotator_offsets(pang_deg, pa_deg, flip=False, ins_delta=0.0):
-    """Calculate the effective instrument rotator offset.
+def calc_offset_angle(pang_deg, pa_deg, flip=False, ins_delta=0.0):
+    """Calculate the instrument rotator offset.
+
+    NOTE: DOES NOT NORMALIZE THE ANGLES
 
     Parameters
     ----------
@@ -433,8 +435,8 @@ def calc_rotator_offsets(pang_deg, pa_deg, flip=False, ins_delta=0.0):
 
     Returns
     -------
-    offset_deg, alternate_offset_deg : tuple of (float, float)
-        The desirable rotator values for this observation
+    offset_deg : tuple of float
+        The rotator offset value for this observation
     """
     # offset_angle = parallactic_angle + position_angle
     offset_deg = pang_deg + pa_deg
@@ -444,13 +446,10 @@ def calc_rotator_offsets(pang_deg, pa_deg, flip=False, ins_delta=0.0):
         offset_deg = -offset_deg
 
     offset_deg = offset_deg + ins_delta
-    offset_deg = normalize_angle(offset_deg, limit='full')
-    alt_offset_deg = calc_alternate_angle(offset_deg)
-
-    return np.array([offset_deg, alt_offset_deg])
+    return offset_deg
 
 
-def calc_possible_rotations(pang_deg_start, pang_deg_stop, pa_deg, ins_name):
+def calc_possible_rotations(start_pang_deg, stop_pang_deg, pa_deg, ins_name):
     """Calculate the possible instrument rotations.
 
     Parameters
@@ -469,19 +468,30 @@ def calc_possible_rotations(pang_deg_start, pang_deg_stop, pa_deg, ins_name):
 
     Returns
     -------
-    offset_deg : float
-        The desirable rotator value for this observation
+    possible_rots : array of (float, float)
+        The rotator offset angles for this parallactic angle
+
+    NOTE: the possibilities are not guaranteed to be achievable.
+    They should be further checked against limits.
     """
     ins_delta = mount_offsets.get(ins_name, 0.0)
     ins_flip = mount_flip.get(ins_name, False)
 
-    left_start_deg, right_start_deg = calc_rotator_offsets(pang_deg_start,
-                                                           pa_deg,
-                                                           flip=ins_flip,
-                                                           ins_delta=ins_delta)
-    left_stop_deg, right_stop_deg = calc_rotator_offsets(pang_deg_stop,
-                                                         pa_deg,
-                                                         flip=ins_flip,
-                                                         ins_delta=ins_delta)
+    start_offset_deg = calc_offset_angle(start_pang_deg, pa_deg, flip=ins_flip,
+                                         ins_delta=ins_delta)
+    stop_offset_deg = calc_offset_angle(stop_pang_deg, pa_deg, flip=ins_flip,
+                                        ins_delta=ins_delta)
+
+    rot_diff = stop_offset_deg - start_offset_deg
+    # sign of this should indicate the direction of the rotation
+    # rot_sign = np.sign(rot_diff)
+
+    # normalize angles to (-360, +360)
+    left_start_deg = normalize_angle(start_offset_deg, limit=None)
+    left_stop_deg = left_start_deg + rot_diff
+
+    right_start_deg = calc_alternate_angle(start_offset_deg)
+    right_stop_deg = right_start_deg + rot_diff
+
     return np.array([(left_start_deg, left_stop_deg),
                      (right_start_deg, right_stop_deg)])
