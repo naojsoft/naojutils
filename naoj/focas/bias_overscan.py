@@ -6,7 +6,7 @@ from astropy.io import fits
 import argparse
 from . import focasifu as fi
 
-# Dfinitions for the over scan regions in the DS9 image coordinate.
+# Definitions for the over scan regions in the DS9 image coordinate.
 # Format
 # 1: start of left overscan region
 # 2: end  of left overscan region
@@ -18,13 +18,13 @@ from . import focasifu as fi
 overscan = {}
 # binning == 1
 overscan[1] = np.asarray([
-    # For left image
+    # For left (DET-ID == 2) image
     [2, 8, 9, 520, 521, 536],
     [537, 552, 553, 1064, 1065, 1071],
     [1074, 1080, 1081, 1592, 1593, 1608],
     [1609, 1624, 1625, 2136, 2137, 2142],
     #
-    # For right image
+    # For right (DET-ID == 1) image
     [2, 8, 9, 520, 521, 536],
     [537, 552, 553, 1064, 1065, 1071],
     [1074, 1080, 1081, 1592, 1593, 1608],
@@ -33,13 +33,13 @@ overscan[1] = np.asarray([
 
 # binning == 2
 overscan[2] = np.asarray([
-    # For left image
+    # For left (DET-ID == 2) image
     [2, 4, 5, 260, 261, 276],
     [277, 292, 293, 548, 549, 551],
     [553, 556, 557, 812, 813, 828],
     [829, 844, 845, 1100, 1101, 1104],
     #
-    # For right image
+    # For right (DET-ID == 1) image
     [1, 4, 5, 260, 261, 276],
     [277, 292, 293, 548, 549, 551],
     [553, 556, 557, 812, 813, 828],
@@ -48,13 +48,13 @@ overscan[2] = np.asarray([
 
 # binning == 4
 overscan[4] = np.asarray([
-    # For left image
+    # For left (DET-ID == 2) image
     [1, 2, 3, 130, 131, 146],
     [147, 162, 163, 290, 291, 292],
     [293, 294, 295, 422, 423, 438],
     [439, 454, 455, 582, 583, 584],
     #
-    # For right image
+    # For right (DET-ID == 1) image
     [1, 2, 3, 130, 131, 146],
     [147, 162, 163, 290, 291, 292],
     [293, 294, 295, 422, 423, 438],
@@ -79,7 +79,7 @@ def bias_subtraction(inhdl, template_pfx):
     # Get the appropriate over scan region area
     ovs = overscan[binfac1]
 
-    # Discriminating whether the flame is for left or right.
+    # Discriminating whether the frame is for left or right.
     # detid = 1 => right image
     # detid = 2 => left image
     if detid == 1:
