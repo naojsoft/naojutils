@@ -1,4 +1,7 @@
 # grism_info.py
+"""
+This module is used by the Ginga plugin MOIRCS_Mask_Builder
+"""
 
 grism_info_map = {
     'zJ500': {

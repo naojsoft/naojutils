@@ -38,9 +38,9 @@ A plugin to build masks for MOIRCS Instrument
 
 * Toggle the following options as needed:
 
-  * **Slit/Hole ID** – Show object IDs in the upper-right corner of each shape.
-  * **Comments** – Display user-entered comments near slits or holes.
-  * **Excluded** – Highlight excluded slits/holes in purple.
+  * **Slit/Hole ID** -- Show object IDs in the upper-right corner of each shape.
+  * **Comments** -- Display user-entered comments near slits or holes.
+  * **Excluded** -- Highlight excluded slits/holes in purple.
 
 **7. View or Manage Slits and Holes**
 
@@ -57,7 +57,7 @@ A plugin to build masks for MOIRCS Instrument
 
     * Outside circular field boundary
     * Outside central channel gap
-    * More than ±3 arcsec from the centerline
+    * More than +/- 3 arcsec from the centerline
 * Lower-priority items will be auto-marked as **excluded**.
 * Enable **Excluded** toggle to view these items in purple on the canvas.
 
@@ -93,8 +93,8 @@ A plugin to build masks for MOIRCS Instrument
 
 * Default is **none**.
 * Select a different Tick from the **Tick Marks** dropdown menu.
-* ⚠️ Spectral dashed line rendering is under development. 
-    * Intervals below 200 may degrade performance or impact other features. 
+* NOTE (!): Spectral dashed line rendering is under development.
+    * Intervals below 200 may degrade performance or impact other features.
     * For stability, resetting to the default value is recommended before using other functions.
 
 **15. Grism Selection and Parameters**
@@ -116,11 +116,10 @@ A plugin to build masks for MOIRCS Instrument
 
 """
 
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
-from moircs_fov import MOIRCS_FOV
-import numpy as np
+import os.path
 import copy
+
+import numpy as np
 from qtpy.QtWidgets import (
     QFileDialog, QInputDialog, QVBoxLayout, QLabel, QScrollArea, QWidget,
     QPushButton, QDialog, QComboBox, QLineEdit, QCheckBox, QMessageBox
@@ -128,15 +127,18 @@ from qtpy.QtWidgets import (
 
 from ginga.gw import Widgets
 from ginga import GingaPlugin
-from grism_info import grism_info_map
 from ginga.canvas.CanvasObject import get_canvas_types
+
+# local imports
+from naoj.moircs.moircs_fov import MOIRCS_FOV
+from naoj.moircs.grism_info import grism_info_map
 
 
 class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def __init__(self, fv, fitsimage):
         super().__init__(fv, fitsimage)
 
-        width, height = self.fitsimage.get_data_size()  
+        width, height = self.fitsimage.get_data_size()
         x_center = width / 2
         y_center = height / 2
         pt_center = (x_center, y_center)
@@ -743,7 +745,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return True
 
         y_center = self.fov_center[1]
-        min_pixel_dist = min_arcsec_from_center / (self.fov_overlay.pixscale * 3600)  
+        min_pixel_dist = min_arcsec_from_center / (self.fov_overlay.pixscale * 3600)
         return abs(y - y_center) >= min_pixel_dist
 
     def _on_click_event(self, canvas, button, data_x, data_y):
@@ -951,7 +953,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # Clear all slit, hole, and label objects
         for obj in list(self.canvas.objects):
             if hasattr(obj, 'tag') and isinstance(obj.tag, str) and (
-                obj.tag.startswith("slit") or obj.tag.startswith("hole") or 
+                obj.tag.startswith("slit") or obj.tag.startswith("hole") or
                 obj.tag.startswith("label") or obj.tag.startswith("label_comment")):
                 try:
                     self.canvas.delete_object_by_tag(obj.tag)
@@ -1040,7 +1042,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.canvas.enable_draw(True)
         self.canvas.redraw(whence=0)
-    
+
     def draw_spectra(self):
         # Check toggle state first
         if not self.w.display_spectra.get_state():
@@ -1204,7 +1206,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def show_dashline_change_warning(self):
         QMessageBox.warning(None,  # or self.fv.w.root if available
             "Spectral Dash Line Notice",
-            "⚠️ Spectral dashed line rendering is under development.\n\n"
+            "NOTE (!) Spectral dashed line rendering is under development.\n\n"
             "For stability, it is recommended to reset the interval to the default \n"
             "before using other functions."
 )

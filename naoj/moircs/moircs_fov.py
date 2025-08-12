@@ -1,3 +1,6 @@
+"""
+This module is used by the Ginga plugin MOIRCS_Mask_Builder
+"""
 class CS_FOV:
     def __init__(self, canvas, pt):
         self.canvas = canvas
