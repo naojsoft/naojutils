@@ -115,21 +115,19 @@ A plugin to build masks for MOIRCS Instrument
 * Header info includes the original `.mdp` file name and current center coordinates.
 
 """
-
+# stdlib
 import os.path
 import copy
 
+# 3rd party
 import numpy as np
-from qtpy.QtWidgets import (
-    QFileDialog, QInputDialog, QVBoxLayout, QLabel, QScrollArea, QWidget,
-    QPushButton, QDialog, QComboBox, QLineEdit, QCheckBox, QMessageBox
-)
 
+# ginga
 from ginga.gw import Widgets
 from ginga import GingaPlugin
-from ginga.canvas.CanvasObject import get_canvas_types
+from ginga.util.paths import icondir as ginga_icon_dir
 
-# local imports
+# local
 from naoj.moircs.moircs_fov import MOIRCS_FOV
 from naoj.moircs.grism_info import grism_info_map
 
@@ -168,10 +166,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         canvas.register_for_cursor_drawing(self.fitsimage)
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
-
-        p_canvas = self.fitsimage.get_canvas()
-        if not p_canvas.has_tag('maskbuilder-canvas'):
-            p_canvas.add(self.canvas, tag='maskbuilder-canvas')
 
         self.fov_center = pt_center
         self.fov_overlay = None
@@ -241,14 +235,17 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_sh_display.add_widget(label_sh_display, stretch=0)
 
         self.w.display_slit_id = Widgets.CheckBox("Slit/Hole ID")
+        self.w.display_slit_id.set_tooltip("Show slit or hole id beside item")
         self.w.display_slit_id.add_callback('activated', lambda *args: self.draw_slits())
         hbox_sh_display.add_widget(self.w.display_slit_id, stretch=0)
 
         self.w.display_comments = Widgets.CheckBox("Comments")
+        self.w.display_comments.set_tooltip("Show comments by slits")
         self.w.display_comments.add_callback('activated', lambda *args: self.draw_slits())
         hbox_sh_display.add_widget(self.w.display_comments, stretch=0)
 
         self.w.show_excluded = Widgets.CheckBox("Excluded")
+        self.w.show_excluded.set_tooltip("Show excluded slits or holes")
         self.w.show_excluded.add_callback('activated', lambda w, val: self.toggle_show_excluded(val))
         hbox_sh_display.add_widget(self.w.show_excluded, stretch=0)
 
@@ -259,9 +256,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_view_auto.set_spacing(4)
 
         btn_view_params = Widgets.Button("Show Slit List")
+        btn_view_params.set_tooltip("Show the slit list with enabling checkboxes")
         btn_view_params.add_callback('activated', lambda w: self.show_slit_and_hole_info())
 
         btn_auto = Widgets.Button("Auto Detection")
+        btn_auto.set_tooltip("Detect and exclude holes and slits outside detector area")
         btn_auto.add_callback('activated', lambda w: self.auto_detect_overlaps())
 
         hbox_view_auto.add_widget(btn_view_params, stretch=0)
@@ -272,10 +271,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_add_edit = Widgets.HBox()
         hbox_add_edit.set_spacing(4)
         btn_add = Widgets.Button("Add")
+        btn_add.set_tooltip("Add a hole or slit")
         btn_add.add_callback('activated', lambda w: self.add_slit_or_hole())
         btn_edit = Widgets.Button("Edit")
+        btn_edit.set_tooltip("Edit a hole or slit")
         btn_edit.add_callback('activated', lambda w: self.edit_slit_or_hole())
         btn_undo = Widgets.Button("Undo")
+        btn_undo.set_tooltip("Undo the last add/edit")
         btn_undo.add_callback('activated', lambda w: self.undo_last_edit())
         hbox_add_edit.add_widget(btn_add, stretch=0)
         hbox_add_edit.add_widget(btn_edit, stretch=0)
@@ -297,6 +299,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_display.add_widget(label_display, stretch=0)
 
         self.w.display_spectra = Widgets.CheckBox("Spectra")
+        self.w.display_spectra.set_tooltip("Show spectral dispersion areas")
         self.w.display_spectra.add_callback('activated', lambda *args: self.draw_spectra())
         hbox_display.add_widget(self.w.display_spectra, stretch=0)
 
@@ -308,14 +311,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_dashline.add_widget(Widgets.Label("Tick Marks (pixels):"), stretch=0)
 
         self.w.dash_interval = Widgets.ComboBox()
+        self.w.dash_interval.set_tooltip("Show dashed lines in spectral dispersion boxes")
         for val in ['none(default)','50', '100', '150', '200', '250', '300']:
             self.w.dash_interval.append_text(val)
         self.w.dash_interval.set_index(0)
-
-        self.w.dash_interval.add_callback('activated', lambda w, idx: (
-        self.show_dashline_change_warning() if self.w.dash_interval.get_text() in {'50','100', '150', '200', '250','300'} else None,
-        self.redraw_spectra()
-))
+        self.w.dash_interval.add_callback('activated', self.dashline_change_cb)
 
         hbox_dashline.add_widget(self.w.dash_interval, stretch=0)
         vbox_controls.add_widget(hbox_dashline, stretch=0)
@@ -384,7 +384,96 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         fr_controls.set_widget(vbox_controls)
         vbox.add_widget(fr_controls, stretch=0)
 
+        # Add Slit or Hole dialog
+        dialog = Widgets.Dialog(title="Add Slit or Hole",
+                                buttons=[("Cancel", 1), ("OK", 0)],
+                                parent=self.fv.w.root)
+        content = dialog.get_content_area()
+        content.set_border_width(4)
+        combo = Widgets.ComboBox()
+        for label in ["Slit (Rectangle)", "Hole (Circle)"]:
+            combo.append_text(label)
+        content.add_widget(Widgets.Label("Select shape to add:"), stretch=0)
+        content.add_widget(combo, stretch=1)
+        dialog.add_callback('activated', self.add_slit_cb, combo)
+        self.w.add_slit_dialog = dialog
+
+        # Slit and Hole Manager dialog
+        dialog = Widgets.Dialog(title="Slit and Hole Manager",
+                                buttons=[("Close", 0)],
+                                parent=self.fv.w.root)
+        content = dialog.get_content_area()
+        content.set_border_width(4)
+        scroll = Widgets.ScrollArea()
+        gbox = Widgets.GridBox(columns=1)
+        scroll.set_widget(gbox)
+        content.add_widget(scroll, stretch=1)
+        self.w.slits_gbox = gbox
+        self.w.slits_dialog = dialog
+        dialog.add_callback('activated', lambda w, val: w.hide())
+
+        # Confirm Center dialog
+        dialog = Widgets.Dialog(title="Confirm Center Pixel",
+                                buttons=[("Cancel", 1), ("Confirm", 0)],
+                                parent=self.fv.w.root)
+        content = dialog.get_content_area()
+        content.set_border_width(4)
+        dialog.add_callback('activated', self.confirm_center_dialog_cb)
+        self.w.confirm_center_dialog = dialog
+
         # --- Bottom Buttons (Load/Save/etc.) ---
+        btns = Widgets.HBox()
+        btns.set_spacing(4)
+
+        self.w.filepath = Widgets.TextEntry()
+        btn_browse = Widgets.Button("Load MDP")
+        btn_browse.set_tooltip("Load an MDP file")
+        # Load MDP file dialog
+        self.w.fbrowser = Widgets.FileDialog(title="Select MDP file",
+                                             parent=self.fv.w.root)
+        self.w.fbrowser.set_mode('file')
+        self.w.fbrowser.add_ext_filter("MDP files", '.mdp')
+        self.w.fbrowser.add_callback('activated', self.browse_file_cb)
+        btn_browse.add_callback('activated', lambda w: self.w.fbrowser.popup())
+
+        btn_reload = Widgets.Button("Reload")
+        btn_reload.set_tooltip("Reload the MDP file")
+        btn_reload.add_callback('activated', lambda w: self.load_file(self.w.filepath.get_text()))
+
+        btns.add_widget(btn_browse, stretch=0)
+        btns.add_widget(self.w.filepath, stretch=1)
+        btns.add_widget(btn_reload, stretch=0)
+        vbox.add_widget(btns, stretch=0)
+
+        btns = Widgets.HBox()
+        btns.set_spacing(4)
+
+        btn_save_mdp = Widgets.Button("Save MDP")
+        btn_save_mdp.set_tooltip("Save MDP file")
+        # Save MDP file dialog
+        self.w.save_mdp = Widgets.FileDialog(title="Save MDP file",
+                                             parent=self.fv.w.root)
+        self.w.save_mdp.set_mode('save')
+        self.w.save_mdp.add_ext_filter(".mdp files", '.mdp')
+        self.w.save_mdp.add_callback('activated', self.save_mdp_file_cb)
+        btn_save_mdp.add_callback('activated', lambda w: self.w.save_mdp.popup())
+
+
+        btn_save_sbr = Widgets.Button("Save SBR")
+        btn_save_sbr.set_tooltip("Save SBR file")
+        # Save SBR file dialog
+        self.w.save_sbr = Widgets.FileDialog(title="Save SBR file",
+                                             parent=self.fv.w.root)
+        self.w.save_sbr.set_mode('save')
+        self.w.save_sbr.add_ext_filter(".sbr files", '.sbr')
+        self.w.save_sbr.add_callback('activated', self.save_sbr_file_cb)
+        btn_save_sbr.add_callback('activated', self.confirm_center_dialog)
+
+        btns.add_widget(Widgets.Label(''), stretch=1)
+        btns.add_widget(btn_save_mdp, stretch=0)
+        btns.add_widget(btn_save_sbr, stretch=0)
+        vbox.add_widget(btns, stretch=0)
+
         btns = Widgets.HBox()
         btns.set_spacing(3)
 
@@ -397,26 +486,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         btns.add_widget(btn_help, stretch=0)
 
         btns.add_widget(Widgets.Label(''), stretch=1)
-
-        self.w.filepath = Widgets.TextEntry()
-        btn_browse = Widgets.Button("Browse")
-        btn_browse.add_callback('activated', self.browse_file)
-        btn_load = Widgets.Button("Load")
-        btn_load.add_callback('activated', lambda w: self.load_file(self.w.filepath.get_text()))
-
-        self.w.save_format = Widgets.ComboBox()
-        self.w.save_format.append_text(".mdp")
-        self.w.save_format.append_text(".sbr")
-        self.w.save_format.set_index(0)  # default to .mdp
-
-        btn_save = Widgets.Button("Save")
-        btn_save.add_callback('activated', lambda w: self.save_file())
-
-        btns.add_widget(self.w.filepath, stretch=5)
-        btns.add_widget(btn_browse, stretch=0)
-        btns.add_widget(btn_load, stretch=0)
-        btns.add_widget(self.w.save_format, stretch=0)
-        btns.add_widget(btn_save, stretch=0)
 
         # Add to main container
         top.add_widget(sw, stretch=1)
@@ -531,7 +600,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.canvas.redraw(whence=0)
 
     def remove_fov_overlay(self):
-        if hasattr(self, 'fov_overlay') and self.fov_overlay:
+        if hasattr(self, 'fov_overlay') and self.fov_overlay is not None:
             try:
                 self.fov_overlay.remove()  # Calls MOIRCS_FOV.remove() to clean up all groups
                 self.logger.info("FOV overlay removed successfully.")
@@ -540,14 +609,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.fov_overlay = None
         self.canvas.redraw(whence=0)
 
-    def browse_file(self, *args):
-        file_path, _ = QFileDialog.getOpenFileName(
-            parent=None,
-            caption="Select MDP file",
-            filter="MDP Files (*.mdp);;All Files (*)"
-        )
-        if file_path:
+    def browse_file_cb(self, w, paths):
+        if len(paths) > 0:
+            file_path = paths[0]
             self.w.filepath.set_text(file_path)
+            self.load_file(file_path)
 
     def load_file(self, filepath):
         if isinstance(filepath, tuple):
@@ -590,49 +656,27 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.shapes = rows
 
     def show_slit_and_hole_info(self):
-        dialog = QDialog()
-        dialog.setWindowTitle("Slit and Hole Manager")
-        layout = QVBoxLayout()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-
-        checkbox_refs = []
+        gbox = self.w.slits_gbox
+        gbox.remove_all(delete=True)
 
         for i, shape in enumerate(self.shapes):
             shape_type = 'Slit' if shape['type'].startswith('B') else 'Hole'
             comment = shape.get('comment', '')
             label = f"{shape_type} #{i} | x={shape['x']:.1f}, y={shape['y']:.1f} | {comment}"
 
-            cb = QCheckBox(label)
+            cb = Widgets.CheckBox(label)
+            gbox.add_widget(cb, i, 0)
             # Checked = included; Unchecked = either _deleted or _excluded
-            cb.setChecked(not shape.get('_deleted', False) and not shape.get('_excluded', False))
+            cb.set_state(not shape.get('_deleted', False) and not shape.get('_excluded', False))
+            cb.add_callback('activated', self.slit_manager_cb, i)
 
-            def make_callback(index, checkbox):
-                def callback(state):
-                    checked = checkbox.isChecked()
-                    self.shapes[index]['_deleted'] = not checked
-                    self.shapes[index]['_excluded'] = not checked
-                    self.draw_slits()
-                    self.draw_spectra()
-                return callback
+        self.w.slits_dialog.show()
 
-            cb.stateChanged.connect(make_callback(i, cb))
-            checkbox_refs.append(cb)
-            scroll_layout.addWidget(cb)
-
-        scroll_content.setLayout(scroll_layout)
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
-
-        btn_close = QPushButton("Close")
-        btn_close.clicked.connect(dialog.accept)
-        layout.addWidget(btn_close)
-
-        dialog.setLayout(layout)
-        dialog.exec_()
+    def slit_manager_cb(self, w, checked, i):
+        self.shapes[i]['_deleted'] = not checked
+        self.shapes[i]['_excluded'] = not checked
+        self.draw_slits()
+        self.draw_spectra()
 
     def toggle_show_excluded(self, val):
         self.show_excluded = val
@@ -641,7 +685,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
     def auto_detect_overlaps(self):
         if not self.shapes:
-            QMessageBox.information(None, "Info", "No shapes to analyze.")
+            self.message_box('info', "Info", "No shapes to analyze.")
             return
 
         # Reset exclusions
@@ -691,35 +735,25 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.draw_slits()
         self.draw_spectra()
-        QMessageBox.information(None, "Auto Detection", f"Excluded {excluded_count} shape(s).")
+        self.message_box('info', "Auto Detection", f"Excluded {excluded_count} shape(s).")
 
     def add_slit_or_hole(self):
         self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
-        dialog = QDialog()
-        dialog.setWindowTitle("Add Slit or Hole")
-        layout = QVBoxLayout()
-        combo = QComboBox()
-        combo.addItems(["Slit (Rectangle)", "Hole (Circle)"])
-        layout.addWidget(QLabel("Select shape to add:"))
-        layout.addWidget(combo)
-        btn_ok = QPushButton("OK")
-        layout.addWidget(btn_ok)
-        dialog.setLayout(layout)
 
-        def on_ok():
-            choice = combo.currentText()
-            dialog.accept()
-            self._add_shape_type = 'slit' if choice.startswith("Slit") else 'hole'
-            p_canvas = self.fitsimage.get_canvas()
-            if not p_canvas.has_object(self.canvas):
-                p_canvas.add(self.canvas, tag='maskbuilder-canvas')
-            self.canvas.set_drawtype('point')
-            self.canvas.set_draw_mode('draw')
-            self.canvas.set_callback('button-press', self._on_click_event)
-            self.canvas.ui_set_active(True, viewer=self.fitsimage)
+        self.w.add_slit_dialog.show()
 
-        btn_ok.clicked.connect(on_ok)
-        dialog.exec_()
+    def add_slit_cb(self, w, val, combo):
+        w.hide()
+        if val == 1:
+            # cancel
+            return
+        self.logger.info("adding slit")
+        choice = combo.get_text()
+        self._add_shape_type = 'slit' if choice.startswith("Slit") else 'hole'
+        self.canvas.set_drawtype('point')
+        self.canvas.set_draw_mode('draw')
+        self.canvas.set_callback('button-press', self._on_click_event)
+        self.canvas.ui_set_active(True, viewer=self.fitsimage)
 
     def is_within_fov_bounds(self, x, y):
         """Check if (x, y) is within MOIRCS rectangle in x, and circle radius in y."""
@@ -770,18 +804,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         out_of_bounds = not self.is_within_fov_bounds(x, y) or not self.is_within_y_arcsec_limit(y)
         if out_of_bounds:
-            QMessageBox.warning(None, "Out of Bounds", "The selected position is outside the allowed FOV, but it will be added.")
+            self.message_box('warning', "Out of Bounds", "The selected position is outside the allowed FOV, but it will be added.")
 
-        dialog = QDialog()
-        dialog.setWindowTitle("Confirm New Shape")
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"Add new {self._add_shape_type} at x={x:.1f}, y={y:.1f}?"))
-        comment_field = QLineEdit()
-        layout.addWidget(QLabel("Comment:"))
-        layout.addWidget(comment_field)
+        dialog = Widgets.Dialog(title="Confirm New Shape",
+                                buttons=[("Confirm", 0), ("Cancel", 1)],
+                                parent=self.fv.w.root)
+        layout = dialog.get_content_area()
+        layout.set_border_width(4)
+        layout.add_widget(Widgets.Label(f"Add new {self._add_shape_type} at x={x:.1f}, y={y:.1f}?"), stretch=0)
+        comment_field = Widgets.TextEntry()
+        layout.add_widget(Widgets.Label("Comment:"), stretch=0)
+        layout.add_widget(comment_field, stretch=0)
 
-        def on_confirm():
-            comment = comment_field.text()
+        def on_confirm(w, val):
+            w.hide()
+            comment = comment_field.get_text()
             shape = {'x': x, 'y': y, 'comment': comment}
             if out_of_bounds:
                 shape['_excluded'] = True  # Initially excluded from auto detection/export
@@ -792,49 +829,42 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.shapes.append(shape)
             self.draw_slits()
             self.draw_spectra()
-            dialog.accept()
 
-        btn_confirm = QPushButton("Confirm")
-        btn_confirm.clicked.connect(on_confirm)
-        layout.addWidget(btn_confirm)
-        dialog.setLayout(layout)
-        dialog.exec_()
+        dialog.add_callback('activated', on_confirm)
+        self.w.confirm_click_dialog = dialog
+        dialog.show()
 
     def edit_slit_or_hole(self):
-        dialog = QDialog()
-        dialog.setWindowTitle("Edit Slit or Hole")
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Select ID to edit:"))
-        combo = QComboBox()
+        dialog = Widgets.Dialog(title="Edit Slit or Hole",
+                                buttons=[("Apply", 0), ("Close", 1)])
+        layout = dialog.get_content_area()
+        layout.set_border_width(4)
+        layout.add_widget(Widgets.Label("Select ID to edit:"))
+        combo = Widgets.ComboBox()
         id_map = {}
+        j = 0
         for i, shape in enumerate(self.shapes):
             if shape.get('_deleted'):
                 continue
             prefix = 'B' if shape['type'].startswith('B') else 'C'
             label = f"{prefix}{i}: {shape.get('comment', '')}"
-            combo.addItem(label)
-            id_map[combo.count() - 1] = shape
-        layout.addWidget(combo)
-        fields_widget = QWidget()
-        fields_layout = QVBoxLayout()
-        fields_widget.setLayout(fields_layout)
-        layout.addWidget(fields_widget)
+            combo.append_text(label)
+            id_map[j] = shape
+            j += 1
+        layout.add_widget(combo, stretch=0)
+        fields_widget = Widgets.VBox()
+        layout.add_widget(fields_widget)
         current_fields = {}
 
         def clear_fields():
-            while fields_layout.count():
-                item = fields_layout.takeAt(0)
-                widget = item.widget()
-                if widget:
-                    widget.deleteLater()
-            current_fields.clear()
+            fields_widget.remove_all()
 
         def add_field(name, initial_value):
-            lbl = QLabel(name)
-            le = QLineEdit()
-            le.setText(str(initial_value))
-            fields_layout.addWidget(lbl)
-            fields_layout.addWidget(le)
+            lbl = Widgets.Label(name)
+            le = Widgets.TextEntry()
+            le.set_text(str(initial_value))
+            fields_widget.add_widget(lbl, stretch=0)
+            fields_widget.add_widget(le, stretch=0)
             current_fields[name] = le
 
         def populate_fields(index):
@@ -850,39 +880,43 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 add_field("Diameter:", shape.get('diameter', ''))
             add_field("Comment:", shape.get('comment', ''))
 
-        combo.currentIndexChanged.connect(populate_fields)
+        combo.add_callback('activated', lambda w, idx: populate_fields(idx))
         populate_fields(0)
 
-        def apply_changes():
-            shape = id_map[combo.currentIndex()]
+        def apply_changes(w, val):
+            if val == 1:
+                w.hide()
+                return
+            shape = id_map[combo.get_index()]
             try:
-                x = float(current_fields["X:"].text())
-                y = float(current_fields["Y:"].text())
+                x = float(current_fields["X:"].get_text())
+                y = float(current_fields["Y:"].get_text())
 
                 if not self.is_within_fov_bounds(x, y) or not self.is_within_y_arcsec_limit(y):
-                    QMessageBox.warning(dialog, "Out of Bounds", "The specified position is outside the allowed FOV.")
+                    self.message_box('warning', "Out of Bounds", "The specified position is outside the allowed FOV.", parent=dialog)
                     return
 
                 if shape['type'].startswith('B'):
-                    width = float(current_fields["Width:"].text())
-                    length = float(current_fields["Length:"].text())
-                    angle = float(current_fields["Angle:"].text())
+                    width = float(current_fields["Width:"].get_text())
+                    length = float(current_fields["Length:"].get_text())
+                    angle = float(current_fields["Angle:"].get_text())
                     if width < 35:
-                        QMessageBox.warning(dialog, "Invalid input", "Width must be at least 35.")
+                        self.message_box('warning', "Invalid input", "Width must be at least 35.",
+                                         parent=dialog)
                         return
                     if length < 6.8:
-                        QMessageBox.warning(dialog, "Invalid input", "Length must be at least 6.8.")
+                        self.message_box('warning', "Invalid input", "Length must be at least 6.8.", parent=dialog)
                         return
                 else:
-                    diameter = float(current_fields["Diameter:"].text())
+                    diameter = float(current_fields["Diameter:"].get_text())
                     if diameter < 20 or diameter > 30:
-                        QMessageBox.warning(dialog, "Invalid input", "Diameter must be between 20 and 30.")
+                        self.message_box('warning', "Invalid input", "Diameter must be between 20 and 30.", parent=dialog)
                         return
 
                 self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
                 shape['x'] = x
                 shape['y'] = y
-                shape['comment'] = current_fields["Comment:"].text()
+                shape['comment'] = current_fields["Comment:"].get_text()
                 if shape['type'].startswith('B'):
                     shape['width'] = width
                     shape['length'] = length
@@ -891,19 +925,16 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     shape['diameter'] = diameter
                 self.draw_slits()
                 self.draw_spectra()
-                dialog.accept()
             except ValueError:
-                QMessageBox.warning(dialog, "Invalid input", "Please enter valid numeric values.")
+                self.message_box('warning', "Invalid input", "Please enter valid numeric values.", parent=dialog)
 
-        btn_apply = QPushButton("Apply")
-        btn_apply.clicked.connect(apply_changes)
-        layout.addWidget(btn_apply)
-        dialog.setLayout(layout)
-        dialog.exec_()
+        dialog.add_callback('activated', apply_changes)
+        self.w.edit_slit_dialog = dialog
+        dialog.show()
 
     def undo_last_edit(self):
         if not self._undo_stack:
-            print("Nothing to undo")
+            self.fv.show_error("Nothing to undo!", raisetab=True)
             return
         last_state = self._undo_stack.pop()
         self.shapes = last_state['shapes']
@@ -1057,8 +1088,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.fitsimage.redraw()
             return
 
-        CompoundObject = get_canvas_types().CompoundObject
-
         # Clean up previously drawn spectra-related objects
         for obj in list(self.canvas.objects):
             if hasattr(obj, 'tag') and isinstance(obj.tag, str):
@@ -1150,7 +1179,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                             offset += interval_y
 
                     if dash_lines:
-                        group = CompoundObject(*dash_lines)
+                        group = self.dc.CompoundObject(*dash_lines)
                         group.tag = f"dashline_bundle_{i}"
                         dash_groups.append(group)
 
@@ -1158,7 +1187,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.logger.warning(f"Dash line rendering skipped: {e}")
 
         if dash_groups:
-            self.canvas.add(CompoundObject(*dash_groups), tag="dashline_master")
+            self.canvas.add(self.dc.CompoundObject(*dash_groups),
+                            tag="dashline_master")
 
         # --- Spectral Rectangles ---
         for i, shape in enumerate(self.shapes):
@@ -1196,36 +1226,27 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             objects_to_draw.append(rect)
 
         if objects_to_draw:
-            self.canvas.add(CompoundObject(*objects_to_draw), tag="spectra_bundle")
+            self.canvas.add(self.dc.CompoundObject(*objects_to_draw),
+                            tag="spectra_bundle")
 
         self.fitsimage.redraw()
 
     def redraw_spectra(self):
         self.draw_spectra()
 
-    def show_dashline_change_warning(self):
-        QMessageBox.warning(None,  # or self.fv.w.root if available
-            "Spectral Dash Line Notice",
-            "NOTE (!) Spectral dashed line rendering is under development.\n\n"
-            "For stability, it is recommended to reset the interval to the default \n"
-            "before using other functions."
-)
+    def dashline_change_cb(self, w, idx):
+        if idx > 0:
+            self.message_box('warning',
+                             "Spectral Dash Line Notice",
+                             "NOTE (!) Spectral dashed line rendering is under development.\n\n"
+                            "For stability, it is recommended to reset the interval to the default before using other functions.", parent=self.fv.w.root)
+        self.redraw_spectra()
 
-
-    def save_file(self):
-        format_choice = self.w.save_format.get_text()
-
-        if format_choice == '.mdp':
-            self.save_as_mdp()
-        elif format_choice == '.sbr':
-            self.save_as_sbr()
-
-    def save_as_mdp(self):
-        filename, _ = QFileDialog.getSaveFileName(
-            caption="Save .mdp File", filter="MDP files (*.mdp)"
-        )
-        if not filename:
+    def save_mdp_file_cb(self, w, paths):
+        if len(paths) == 0:
             return
+        filename = paths[0]
+
         img_h = self.fitsimage.get_data_size()[1]
         with open(filename, 'w') as f:
             for shape in self.shapes:
@@ -1245,43 +1266,56 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 else:
                     f.write(line)
 
-    def save_as_sbr(self):
-        filename, _ = QFileDialog.getSaveFileName(
-            caption="Save .sbr File", filter="SBR files (*.sbr)"
-        )
-        if not filename:
+    def confirm_center_dialog(self, w):
+        dialog = self.w.confirm_center_dialog
+        content = dialog.get_content_area()
+        content.remove_all(delete=True)
+
+        fov_x_ctr = self.w.fov_center_x.get_value()
+        fov_y_ctr = self.w.fov_center_y.get_value()
+        lbl = f"FOV center X: ({fov_x_ctr:.2f}), Y: ({fov_y_ctr:.2f})"
+        content.add_widget(Widgets.Label(lbl))
+        content.add_widget(Widgets.Label("Cancel and change up top if needed"))
+        dialog.show()
+
+    def confirm_center_dialog_cb(self, w, val):
+        w.hide()
+        if val == 1:
+            # cancel
             return
+        # ok-- go ahead and show the Save SBR dialog
+        self.w.save_sbr.popup()
+
+    def save_sbr_file_cb(self, w, paths):
+        if len(paths) == 0:
+            # cancel
+            return
+        filename = paths[0]
+
         pixscale = getattr(self, 'pixscale', 0.117000)
         beta = getattr(self, 'beta', 0.29898169)
         mos_rot = getattr(self, 'mos_rot', 0.0)
         offset = np.deg2rad(mos_rot)
         conversion = 0.015 / beta / 0.1038 * pixscale
-        default_xFOVCenter = self.w.fov_center_x.get_value() if hasattr(self.w, 'fov_center_x') else 1084
-        default_yFOVCenter = self.w.fov_center_y.get_value() if hasattr(self.w, 'fov_center_y') else 1786
-        xFOVCenter, ok1 = QInputDialog.getDouble(None, "FOV Center", "X (pixels):", default_xFOVCenter, decimals=2)
-        if not ok1:
-            return
-        yFOVCenter, ok2 = QInputDialog.getDouble(None, "FOV Center", "Y (pixels):", default_yFOVCenter, decimals=2)
-        if not ok2:
-            return
-        self.xFOVCenter = xFOVCenter
-        self.yFOVCenter = yFOVCenter
+        fov_x_ctr = self.w.fov_center_x.get_value()
+        fov_y_ctr = self.w.fov_center_y.get_value()
+
         mdp_filename = getattr(self, 'mdp_filename', 'UNKNOWN_MDP')
         image_name = getattr(self, 'image_name', 'UNKNOWN_IMAGE')
         try:
             with open(filename, 'w') as f:
                 f.write(f"# mdp: {mdp_filename}\n")
                 f.write(f"# Image: {image_name}\n")
-                f.write(f"# FOV Center: x={xFOVCenter:.2f}, y={yFOVCenter:.2f}\n")
+                f.write(f"# FOV Center: x={fov_x_ctr:.2f}, y={fov_y_ctr:.2f}\n")
                 shapes_filtered = [s for s in self.shapes if not s.get('_deleted')]
                 for i, shape in enumerate(shapes_filtered):
                     x = shape['x']
                     y = shape['y']
                     sl_l = shape['width'] * 0.5 if shape['type'].startswith('B') else shape['diameter'] * 0.5
-                    x1_off = x - sl_l - xFOVCenter
-                    x2_off = x + sl_l - xFOVCenter
-                    y1_off = y - yFOVCenter
-                    y2_off = y - yFOVCenter
+                    x1_off = x - sl_l - fov_x_ctr
+                    x2_off = x + sl_l - fov_x_ctr
+                    y1_off = y - fov_y_ctr
+                    y2_off = y - fov_y_ctr
                     x1_focus = -x1_off * conversion
                     x2_focus = -x2_off * conversion
                     y1_focus = y1_off * conversion
@@ -1306,10 +1340,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                         np.hypot(x2_focus, y2_focus)
                     ])
                     if np.any(corners_r > 90):
-                        QMessageBox.warning(None, "Warning", f"{'Slit' if shape['type'].startswith('B') else 'Hole'} {i} is out of laser FOV.")
+                        self.message_box('warning', "Warning", f"{'Slit' if shape['type'].startswith('B') else 'Hole'} {i} is out of laser FOV.")
                         continue
                     if shape['type'].startswith('B') and np.any(np.abs([x1_focus, x2_focus]) > 60):
-                        QMessageBox.warning(None, "Warning", f"Slit {i} is out of MOIRCS FOV.")
+                        self.message_box('warning', "Warning", f"Slit {i} is out of MOIRCS FOV.")
                         continue
                     if shape['type'].startswith('B'):
                         width = (shape['length'] * pixscale / 2.06218 * 1.006) * 1.08826 - 0.126902
@@ -1318,21 +1352,44 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                         radius = shape['diameter'] / 2 * 0.015 / beta / 0.1038 * pixscale
                         f.write(f"C,{(x1_laser + x2_laser)/2:9.4f},{(y1_laser + y2_laser)/2:9.4f},{abs((x2_laser-x1_laser)/2):9.4f}\n")
         except IOError as e:
-            QMessageBox.critical(None, "Error", f"Failed to write SBR file: {str(e)}")
+            self.message_box('critical', "Error", f"Failed to write SBR file: {str(e)}")
+
+    def message_box(self, category, title, message, parent=None):
+        warn = Widgets.Dialog(title=title, modal=False,
+                              parent=self.fv.w.root,
+                              buttons=[("Dismiss", 0)])
+        vbox = warn.get_content_area()
+        vbox.set_margins(4, 4, 4, 4)
+        hbox = Widgets.HBox()
+        hbox.set_border_width(4)
+        hbox.add_widget(Widgets.Label(""), stretch=1)
+        img = Widgets.Image()
+        # TODO: critical, warning, info -- different icons
+        iconfile = os.path.join(ginga_icon_dir, "warning.svg")
+        img.load_file(iconfile)
+        hbox.add_widget(img, stretch=0)
+        hbox.add_widget(Widgets.Label(""), stretch=1)
+        vbox.add_widget(hbox, stretch=1)
+        vbox.add_widget(Widgets.Label(message))
+        warn.add_callback('activated', lambda w, val: w.hide())
+        warn.add_callback('close', lambda w: w.hide())
+        self.w.warning = warn
+        warn.show()
 
     def close(self):
         self.fv.stop_local_plugin(self.chname, str(self))
         return True
 
     def start(self):
-        canvas = self.fitsimage.get_canvas()
-        if self.canvas not in canvas.objects:
-            canvas.add(self.canvas)
+        p_canvas = self.fitsimage.get_canvas()
+        if self.canvas not in p_canvas:
+            p_canvas.add(self.canvas, tag='maskbuilder-canvas')
         self.fitsimage.redraw()
 
     def stop(self):
         self.canvas.delete_all_objects()
-        self.fitsimage.get_canvas().delete_object_by_tag('maskbuilder-canvas')
+        p_canvas = self.fitsimage.get_canvas()
+        p_canvas.delete_object(self.canvas)
         self.shapes.clear()
         self._undo_stack.clear()
         self.remove_fov_overlay()
