@@ -16,7 +16,7 @@ A plugin to build masks for MOIRCS Instrument
 
 **2. Launch the Plugin**
 
-* Go to `Plugins > Spectroscopy > MOIRCS Mask Builder` to activate the plugin panel for the current channel.
+* Go to `Plugins > Subaru > Planning > MOIRCS Mask Builder` to activate the plugin panel for the current channel.
 
 **3. Load an MDP File**
 
@@ -105,13 +105,13 @@ A plugin to build masks for MOIRCS Instrument
 
 **16. Save to .mdp**
 
-* Click **Save** and use the default `.mdp` format.
+* Click **Save MDP**.
 * Enter the desired filename and confirm to save the current layout.
 
 **17. Save to .sbr**
 
-* Change file type to **.sbr** in the save dialog.
-* Click **Save** and confirm filename and FOV center (auto-filled from current settings).
+* Click **Save SBR**.
+* Confirm filename and FOV center (auto-filled from current settings).
 * Header info includes the original `.mdp` file name and current center coordinates.
 
 """
@@ -131,30 +131,28 @@ from ginga.util.paths import icondir as ginga_icon_dir
 from naoj.moircs.moircs_fov import MOIRCS_FOV
 from naoj.moircs.grism_info import grism_info_map
 
+# default center pixel (in FITS (1-based) indexing)
+default_x_ctr, default_y_ctr = (1084, 1786)
+
 
 class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def __init__(self, fv, fitsimage):
         super().__init__(fv, fitsimage)
-
-        width, height = self.fitsimage.get_data_size()
-        x_center = width / 2
-        y_center = height / 2
-        pt_center = (x_center, y_center)
 
         prefs = self.fv.get_preferences()
         self.settings = prefs.create_category('plugin_MOIRCS_Mask_Builder')
         self.settings.add_defaults(display_slitID=True, grism='zJ500')
         self.settings.load(onError='silent')
 
-        self.grismtypes = ('zJ500', 'HK500', 'LS_J', 'LS_H', 'VB_K', 'VPH-Y')
+        self.grismtypes = list(grism_info_map.keys())
         self.grism_info_map = grism_info_map
         default_grism = self.settings.get('grism', 'zJ500')
         self.grism_info = dict(self.grism_info_map.get(default_grism, {}))
 
         self.shapes = []  # Unified list for slits and holes
-        self.spinboxes = {}
-        self.spinbox_scales = {}
         self._undo_stack = []
+        self._updating_grism_params = False
+        self.show_excluded = False
 
         self.dc = fv.get_draw_classes()
         canvas = self.dc.DrawingCanvas()
@@ -167,8 +165,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
 
-        self.fov_center = pt_center
-        self.fov_overlay = None
+        self.pixscale = 0.117
+        self.beta = 0.29898169
+        self.mos_rot_deg = 0.0
+        self.mdp_filename = 'UNKNOWN_MDP'
+        self.fits_filename = 'UNKNOWN_IMAGE'
+        self.valid_intervals = ['50', '100', '150', '200', '250', '300']
+        self.fov_center = (default_x_ctr, default_y_ctr)
+        self.fov_overlay = MOIRCS_FOV(self.canvas, self.fov_center)
+        self.gui_up = False
 
     def build_gui(self, container):
         top = Widgets.VBox()
@@ -187,30 +192,33 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_fov.set_spacing(4)
         hbox_fov.add_widget(Widgets.Label("MOIRCS FOV:"), stretch=0)
 
-        self.cb_ch1 = Widgets.CheckBox("CH1")
-        self.cb_ch1.set_state(True)
-        self.cb_ch1.add_callback('activated', lambda w, state: self.on_fov_changed(w, state))
-        hbox_fov.add_widget(self.cb_ch1, stretch=0)
+        self.w.cb_ch1 = Widgets.CheckBox("CH1")
+        self.w.cb_ch1.set_state(True)
+        self.w.cb_ch1.add_callback('activated',
+                                   lambda w, tf: self.update_fov())
+        hbox_fov.add_widget(self.w.cb_ch1, stretch=0)
 
-        self.cb_ch2 = Widgets.CheckBox("CH2")
-        self.cb_ch2.set_state(True)
-        self.cb_ch2.add_callback('activated', lambda w, state: self.on_fov_changed(w, state))
-        hbox_fov.add_widget(self.cb_ch2, stretch=0)
+        self.w.cb_ch2 = Widgets.CheckBox("CH2")
+        self.w.cb_ch2.set_state(True)
+        self.w.cb_ch2.add_callback('activated',
+                                   lambda w, tf: self.update_fov())
+        hbox_fov.add_widget(self.w.cb_ch2, stretch=0)
 
         fov_controls.add_widget(hbox_fov, stretch=0)
 
         hbox_center = Widgets.HBox()
         hbox_center.set_spacing(4)
-        hbox_center.add_widget(Widgets.Label("FOV Center X:"), stretch=0)
+        hbox_center.add_widget(Widgets.Label("FOV Center X:", halign='right'),
+                               stretch=0)
         self.w.fov_center_x = Widgets.SpinBox()
-        self.w.fov_center_x.set_limits(0, 5000, 1)
-        self.w.fov_center_x.set_value(1084)
+        self.w.fov_center_x.set_limits(0, 7000, 1)
+        self.w.fov_center_x.set_value(self.fov_center[0])
         hbox_center.add_widget(self.w.fov_center_x, stretch=0)
 
-        hbox_center.add_widget(Widgets.Label("Y:"), stretch=0)
+        hbox_center.add_widget(Widgets.Label("Y:", halign='right'), stretch=0)
         self.w.fov_center_y = Widgets.SpinBox()
-        self.w.fov_center_y.set_limits(0, 5000, 1)
-        self.w.fov_center_y.set_value(1786)
+        self.w.fov_center_y.set_limits(0, 7000, 1)
+        self.w.fov_center_y.set_value(self.fov_center[1])
         hbox_center.add_widget(self.w.fov_center_y, stretch=0)
 
         # Update button
@@ -231,7 +239,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_sh_display = Widgets.HBox()
         hbox_sh_display.set_spacing(4)
 
-        label_sh_display = Widgets.Label("Display Options:")
+        label_sh_display = Widgets.Label("Display Options:", halign='right')
         hbox_sh_display.add_widget(label_sh_display, stretch=0)
 
         self.w.display_slit_id = Widgets.CheckBox("Slit/Hole ID")
@@ -295,7 +303,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # Display Options (Spectra / Slit ID)
         hbox_display = Widgets.HBox()
         hbox_display.set_spacing(8)
-        label_display = Widgets.Label("Display Options:")
+        label_display = Widgets.Label("Display Options:", halign='right')
         hbox_display.add_widget(label_display, stretch=0)
 
         self.w.display_spectra = Widgets.CheckBox("Spectra")
@@ -308,11 +316,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # Spectra Dashed Line Interval Dropdown
         hbox_dashline = Widgets.HBox()
         hbox_dashline.set_spacing(6)
-        hbox_dashline.add_widget(Widgets.Label("Tick Marks (pixels):"), stretch=0)
+        hbox_dashline.add_widget(Widgets.Label("Tick Marks (pixels):",
+                                               halign='right'), stretch=0)
 
         self.w.dash_interval = Widgets.ComboBox()
         self.w.dash_interval.set_tooltip("Show dashed lines in spectral dispersion boxes")
-        for val in ['none(default)','50', '100', '150', '200', '250', '300']:
+        for val in ['none(default)'] + self.valid_intervals:
             self.w.dash_interval.append_text(val)
         self.w.dash_interval.set_index(0)
         self.w.dash_interval.add_callback('activated', self.dashline_change_cb)
@@ -323,7 +332,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # Grism selection
         hbox_grism = Widgets.HBox()
         hbox_grism.set_spacing(6)
-        hbox_grism.add_widget(Widgets.Label("Grism:"), stretch=0)
+        hbox_grism.add_widget(Widgets.Label("Grism:", halign='right'),
+                              stretch=0)
 
         self.w.grism = Widgets.ComboBox()
         for name in self.grismtypes:
@@ -491,7 +501,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         top.add_widget(sw, stretch=1)
         top.add_widget(btns, stretch=0)
         container.add_widget(top, stretch=1)
-        self.on_fov_changed()
+
+        self.update_fov()
+
+        self.gui_up = True
 
     def set_entry_value(self, key, val):
         if key in self.textentries:
@@ -501,113 +514,77 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if key in self.textentries:
             try:
                 return float(self.textentries[key].get_text().strip())
+
             except ValueError:
                 return 0.0  # or log a warning
         return 0.0
 
     def set_fov_center_from_user_input(self, widget):
-        x = self.w.fov_center_x.get_value()
-        y = self.w.fov_center_y.get_value()
-        self.fov_center = (x, y)  # Update internal state
-        if hasattr(self, 'fov_overlay') and self.fov_overlay:
-            self.fov_overlay.set_pos((x, y))
-            self.canvas.redraw(whence=0)
-            self.draw_slits()  # Redraw slits to reflect new FOV center
-            self.draw_spectra()  # Redraw spectra to reflect new FOV center
-            self.logger.info(f"FOV center updated to: ({x:.1f}, {y:.1f})")
+        x = int(self.w.fov_center_x.get_value())
+        y = int(self.w.fov_center_y.get_value())
+        self.fov_center = (x, y)
+        self.update_fov()
+
+    def set_fov_center(self, x, y):
+        x, y = int(x), int(y)
+        self.fov_center = (x, y)
+        self.update_fov()
+
+    def set_fov_center_from_image(self):
+        image = self.fitsimage.get_image()
+        if image is not None:
+            width, height = image.get_size()
+            x, y = int(width * 0.5), int(height * 0.5)
+            self.set_fov_center(x_center, y_center)
+
+    def update_fov(self):
+        ch1 = self.w.cb_ch1.get_state()
+        ch2 = self.w.cb_ch2.get_state()
+
+        image = self.fitsimage.get_image()
+        if image is None:
+            width, height = int(2 * default_x_ctr), int(2 * default_y_ctr)
         else:
-            self.logger.warning("FOV overlay not active; initializing.")
-            self.on_fov_changed()  # Trigger FOV overlay update
+            width, height = image.get_size()
+        self.fov_overlay.scale_to_image(width, height)
+        self.fov_overlay.set_pos(self.fov_center)
 
-    def show_fov_overlay(self, ch1, ch2):
-        width, height = self.fitsimage.get_data_size()
-        if width <= 0 or height <= 0:
-            self.logger.warning(f"No image loaded: width={width}, height={height}")
-            self.cb_ch1.set_state(False)
-            self.cb_ch2.set_state(False)
-            self.remove_fov_overlay()
-            self.canvas.redraw(whence=0)
-            return
+        # Safely remove detector groups if they exist on canvas
+        for group in [self.fov_overlay.det1_group,
+                      self.fov_overlay.det2_group,
+                      self.fov_overlay.fov_base]:
+            if group is not None and group in self.canvas:
+                try:
+                    self.canvas.delete_object(group)
+                    self.logger.debug(f"Removed group from canvas")
+                except Exception as e:
+                    self.logger.warning(f"Failed to remove group: {e}")
 
-        try:
-            pt_center = (self.w.fov_center_x.get_value(), self.w.fov_center_y.get_value())
-        except AttributeError as e:
-            self.logger.warning(f"Error accessing FOV center widgets: {e}. Using fallback center.")
-            pt_center = self.fov_center
+        # Add groups based on ch1 and ch2
+        if ch1 and self.fov_overlay.det1_group is not None:
+            self.canvas.add(self.fov_overlay.det1_group, redraw=False)
+            self.logger.debug("Added det1_group to canvas")
 
-        self.fov_center = pt_center  # Update internal state
+        if ch2 and self.fov_overlay.det2_group is not None:
+            self.canvas.add(self.fov_overlay.det2_group, redraw=False)
+            self.logger.debug("Added det2_group to canvas")
 
-        try:
-            if not hasattr(self, 'fov_overlay') or self.fov_overlay is None:
-                self.logger.info("Creating new FOV overlay")
-                self.remove_fov_overlay()
-                self.fov_overlay = MOIRCS_FOV(self.canvas, pt_center)
-                self.fov_overlay.scale_to_image(width, height)
-            else:
-                self.fov_overlay.set_pos(pt_center)
+        # Ensure fov_base is always present
+        if self.fov_overlay.fov_base is None:
+            self.logger.warning("fov_base is None; rebuilding overlay")
+            self.fov_overlay.rebuild()
+        else:
+            self.canvas.add(self.fov_overlay.fov_base, redraw=False)
+            self.logger.debug("Added fov_base to canvas")
 
-            # Safely remove detector groups if they exist on canvas
-            for group in [self.fov_overlay.det1_group, self.fov_overlay.det2_group, self.fov_overlay.fov_base]:
-                if group and group in self.canvas.objects:
-                    try:
-                        self.canvas.delete_object(group)
-                        self.logger.debug(f"Removed group from canvas")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to remove group: {e}")
+        # redraw everything else
+        self.update_slits_spectra()
 
-            # Add groups based on ch1 and ch2
-            if ch1 and self.fov_overlay.det1_group:
-                self.canvas.add(self.fov_overlay.det1_group)
-                self.logger.debug("Added det1_group to canvas")
-            if ch2 and self.fov_overlay.det2_group:
-                self.canvas.add(self.fov_overlay.det2_group)
-                self.logger.debug("Added det2_group to canvas")
+        self.canvas.redraw(whence=3)
 
-            # Ensure fov_base is always present
-            if not self.fov_overlay.fov_base:
-                self.logger.warning("fov_base is None; rebuilding overlay")
-                self.fov_overlay.rebuild()
-            else:
-                self.canvas.add(self.fov_overlay.fov_base)
-                self.logger.debug("Added fov_base to canvas")
-            self.canvas.redraw(whence=0)
-        except Exception as e:
-            self.logger.error(f"Error updating FOV overlay: {e}")
-            self.remove_fov_overlay()
-            self.canvas.redraw(whence=0)
-
-    def on_fov_changed(self, w=None, state=None):
-        if not hasattr(self, 'cb_ch1') or not hasattr(self, 'cb_ch2'):
-            self.logger.warning("Checkboxes not initialized; skipping FOV update.")
-            return
-        try:
-            ch1 = self.cb_ch1.get_state()
-            ch2 = self.cb_ch2.get_state()
-            self.logger.info(f"FOV toggle triggered: CH1={ch1}, CH2={ch2}, Widget={w}, State={state}")
-            if ch1 or ch2:
-                self.show_fov_overlay(ch1, ch2)
-            else:
-                self.remove_fov_overlay()
-                self.logger.info("Both channels unchecked; FOV overlay removed.")
-            self.draw_slits()  # Explicitly redraw slits
-            self.draw_spectra()  # Explicitly redraw spectra
-            self.canvas.redraw(whence=0)
-        except Exception as e:
-            self.logger.error(f"Error in on_fov_changed: {e}")
-            self.remove_fov_overlay()
-            self.draw_slits()
-            self.draw_spectra()
-            self.canvas.redraw(whence=0)
-
-    def remove_fov_overlay(self):
-        if hasattr(self, 'fov_overlay') and self.fov_overlay is not None:
-            try:
-                self.fov_overlay.remove()  # Calls MOIRCS_FOV.remove() to clean up all groups
-                self.logger.info("FOV overlay removed successfully.")
-            except Exception as e:
-                self.logger.error(f"Error removing FOV overlay: {e}")
-            self.fov_overlay = None
-        self.canvas.redraw(whence=0)
+    def update_slits_spectra(self):
+        self.draw_slits()
+        self.draw_spectra()
 
     def browse_file_cb(self, w, paths):
         if len(paths) > 0:
@@ -621,13 +598,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if filepath and os.path.exists(filepath):
             self.mdp_filename = filepath
             self.load_mdp(filepath)
-            self.draw_slits()
-            self.draw_spectra()
+            self.update_slits_spectra()
 
     def load_mdp(self, filepath):
-        self.shapes.clear()
-        img_h = self.fitsimage.get_data_size()[1]
-
         rows = []
         with open(filepath, 'r') as f:
             for line in f:
@@ -654,6 +627,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 rows.append(row_dict)
 
         self.shapes = rows
+        self._undo_stack = []
 
     def show_slit_and_hole_info(self):
         gbox = self.w.slits_gbox
@@ -675,13 +649,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def slit_manager_cb(self, w, checked, i):
         self.shapes[i]['_deleted'] = not checked
         self.shapes[i]['_excluded'] = not checked
-        self.draw_slits()
-        self.draw_spectra()
+        self.update_slits_spectra()
 
     def toggle_show_excluded(self, val):
         self.show_excluded = val
-        self.draw_slits()
-        self.draw_spectra()
+        self.update_slits_spectra()
 
     def auto_detect_overlaps(self):
         if not self.shapes:
@@ -733,8 +705,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     s2['_excluded'] = True
                     excluded_count += 1
 
-        self.draw_slits()
-        self.draw_spectra()
+        self.update_slits_spectra()
         self.message_box('info', "Auto Detection", f"Excluded {excluded_count} shape(s).")
 
     def add_slit_or_hole(self):
@@ -757,7 +728,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
     def is_within_fov_bounds(self, x, y):
         """Check if (x, y) is within MOIRCS rectangle in x, and circle radius in y."""
-        if not hasattr(self, 'fov_overlay') or self.fov_overlay is None:
+        if self.fov_overlay is None:
             self.logger.warning("FOV overlay not initialized; assuming position is valid.")
             return True
 
@@ -773,7 +744,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         return within_x and within_radius
 
     def is_within_y_arcsec_limit(self, y, min_arcsec_from_center=10):
-        """Ensure the slit/hole is at least ±min_arcsec_from_center from the centerline."""
+        """Ensure the slit/hole is at least +/- min_arcsec_from_center from the centerline."""
         if not hasattr(self, 'fov_center') or not hasattr(self, 'fov_overlay'):
             self.logger.warning("FOV center or overlay not initialized; assuming position is valid.")
             return True
@@ -787,17 +758,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.canvas.remove_callback('button-press', self._on_click_event)
         self.canvas.ui_set_active(False, viewer=self.fitsimage)
 
-        try:
-            samplefac = self.common_info.samplefac
-            bin_x, bin_y = self.common_info.bin
-        except AttributeError:
-            samplefac = 1.0
-            bin_x, bin_y = 1, 1
-        try:
-            xoffset = self.xoffset or 0
-            yoffset = self.yoffset or 0
-        except AttributeError:
-            xoffset, yoffset = 0, 0
+        # these are set so that x, y will always be the same as data_x, data_y
+        # can we get rid of them?
+        samplefac = 1.0
+        bin_x, bin_y = 1, 1
+        xoffset, yoffset = 0, 0
 
         x = data_x * bin_x * samplefac + xoffset
         y = data_y * bin_y * samplefac + yoffset
@@ -827,8 +792,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             else:
                 shape.update({'type': 'C', 'diameter': 30})
             self.shapes.append(shape)
-            self.draw_slits()
-            self.draw_spectra()
+            self.update_slits_spectra()
 
         dialog.add_callback('activated', on_confirm)
         self.w.confirm_click_dialog = dialog
@@ -923,8 +887,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     shape['angle'] = angle
                 else:
                     shape['diameter'] = diameter
-                self.draw_slits()
-                self.draw_spectra()
+
+                self.update_slits_spectra()
+
             except ValueError:
                 self.message_box('warning', "Invalid input", "Please enter valid numeric values.", parent=dialog)
 
@@ -938,12 +903,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return
         last_state = self._undo_stack.pop()
         self.shapes = last_state['shapes']
-        self.draw_slits()
-        self.draw_spectra()
-        print("Undo performed")
+        self.update_slits_spectra()
+        self.logger.info("undo!")
 
     def on_grism_param_changed(self, key):
-        if getattr(self, '_updating_grism_params', False):
+        if self._updating_grism_params:
             return
         val = self.get_entry_value(key)
         self.grism_info[key] = val
@@ -963,7 +927,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def update_all_grism_params(self):
         for key in self.textentries:
             self.grism_info[key] = self.get_entry_value(key)
-        self.redraw_spectra()
+        self.draw_spectra()
 
     def reset_grism_params(self):
         grism_name = self.w['grism'].get_text()
@@ -975,38 +939,25 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.set_entry_value(key, val)
             self.grism_info[key] = val
         self._updating_grism_params = False
-
-        self.redraw_spectra()
+        self.draw_spectra()
 
     def draw_slits(self):
-        self.canvas.enable_draw(False)
-
         # Clear all slit, hole, and label objects
-        for obj in list(self.canvas.objects):
-            if hasattr(obj, 'tag') and isinstance(obj.tag, str) and (
-                obj.tag.startswith("slit") or obj.tag.startswith("hole") or
-                obj.tag.startswith("label") or obj.tag.startswith("label_comment")):
-                try:
-                    self.canvas.delete_object_by_tag(obj.tag)
-                except Exception as e:
-                    self.logger.warning(f"Failed to delete object with tag {obj.tag}: {e}")
+        self.canvas.delete_objects_by_tag(['slits'], redraw=False)
 
-        show_excluded = getattr(self, 'show_excluded', False)
         show_ids = self.w.display_slit_id.get_state()
         show_comments = self.w.display_comments.get_state()
+        # these seem to be constant, can we omit them?
         samplefac = 1.0
         bin_x, bin_y = 1, 1
-        xoffset, yoffset = getattr(self, 'xoffset', 0), getattr(self, 'yoffset', 0)
+        xoffset, yoffset = 0, 0
 
         # Use FOV center for channel assignment
         y_center = self.fov_center[1] / bin_y / samplefac
 
-        drawn_shapes = 0
-        skipped_shapes = 0
-
+        objects = []
         for i, shape in enumerate(self.shapes):
-            if shape.get('_deleted') or (shape.get('_excluded') and not show_excluded):
-                skipped_shapes += 1
+            if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
                 continue
 
             x, y = shape['x'], shape['y']
@@ -1021,15 +972,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             is_ch2 = ycen > y_center
 
             # Skip if the shape's channel is unchecked
-            if is_ch1 and not self.cb_ch1.get_state():
-                skipped_shapes += 1
+            if is_ch1 and not self.w.cb_ch1.get_state():
                 continue
-            if is_ch2 and not self.cb_ch2.get_state():
-                skipped_shapes += 1
+            if is_ch2 and not self.w.cb_ch2.get_state():
                 continue
 
-            # Draw slit (rectangle) or hole (circle)
             if shape['type'].startswith('B'):
+                # Draw slit (rectangle)
                 w = shape.get('width', 100.0) / bin_x / samplefac
                 l = shape.get('length', 7.0) / bin_y / samplefac
                 angle = shape.get('angle', 0)
@@ -1038,74 +987,55 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     xcen + w / 2, ycen + l / 2,
                     rotation_deg=angle,
                     color='purple' if shape.get('_excluded') else 'white',
-                    linewidth=1
-                )
-                rect.coord = 'data'
-                self.canvas.add(rect, tag=f"slit{i}")
+                    linewidth=1)
+                objects.append(rect)
+
                 if show_ids:
-                    self.canvas.add(
-                        self.dc.Text(xcen, ycen + l / 2 + 10 / samplefac, text=f"{i}", color='white', fontsize=11),
-                        tag=f"label{i}"
-                    )
+                    objects.append(self.dc.Text(xcen, ycen + l / 2 + 10 / samplefac, text=f"{i}", color='white', fontsize=11))
+
                 if show_comments and comment:
                     comment_text = self.dc.Text(xcen, ycen - l / 2 - 30 / samplefac, text=comment, color='white')
-                    comment_text.coord = 'data'
-                    self.canvas.add(comment_text, tag=f"label_comment{i}")
+                    objects.append(comment_text)
 
             elif shape['type'].startswith('C'):
+                # Draw hole (circle)
                 diameter = shape.get('diameter', 30.0) / samplefac
                 radius = diameter / 2
-                circle = self.dc.Circle(xcen, ycen, radius,
-                                        color='purple' if shape.get('_excluded') else 'yellow', linewidth=1)
-                circle.coord = 'data'
-                self.canvas.add(circle, tag=f"hole{i}")
+                objects.append(self.dc.Circle(xcen, ycen, radius,
+                                              color='purple' if shape.get('_excluded') else 'yellow',
+                                              linewidth=1))
+
                 if show_ids:
-                    self.canvas.add(
-                        self.dc.Text(xcen, ycen + radius + 10 / samplefac, text=f"{i}", color='yellow', fontsize=11),
-                        tag=f"label_hole{i}"
-                    )
+                    objects.append(self.dc.Text(xcen, ycen + radius + 10 / samplefac,
+                                                text=f"{i}", color='yellow', fontsize=11))
+
                 if show_comments and comment:
-                    comment_text = self.dc.Text(xcen, ycen - radius - 30 / samplefac, text=comment, color='yellow')
-                    comment_text.coord = 'data'
-                    self.canvas.add(comment_text, tag=f"label_comment_hole{i}")
+                    objects.append(self.dc.Text(xcen,
+                                                ycen - radius - 30 / samplefac,
+                                                text=comment, color='yellow'))
 
-            drawn_shapes += 1
-
-        self.canvas.enable_draw(True)
-        self.canvas.redraw(whence=0)
+        if len(objects) > 0:
+            self.canvas.add(self.dc.CompoundObject(*objects), tag='slits',
+                            redraw=False)
+        self.canvas.redraw(whence=3)
 
     def draw_spectra(self):
-        # Check toggle state first
-        if not self.w.display_spectra.get_state():
-            # Clean up any previous spectra-related graphics
-            for obj in list(self.canvas.objects):
-                if hasattr(obj, 'tag') and isinstance(obj.tag, str):
-                    if obj.tag.startswith(("dashline_", "dashline_bundle", "spectrum", "footprint", "spectra_bundle")):
-                        try:
-                            self.canvas.delete_object_by_tag(obj.tag)
-                        except Exception:
-                            continue
-            self.fitsimage.redraw()
-            return
-
         # Clean up previously drawn spectra-related objects
-        for obj in list(self.canvas.objects):
-            if hasattr(obj, 'tag') and isinstance(obj.tag, str):
-                if obj.tag.startswith(("dashline_", "dashline_bundle", "spectrum", "footprint", "spectra_bundle")):
-                    try:
-                        self.canvas.delete_object_by_tag(obj.tag)
-                    except Exception:
-                        continue
+        self.canvas.delete_objects_by_tag(['spectra'], redraw=False)
+
+        if not self.w.display_spectra.get_state():
+            self.fitsimage.redraw(whence=3)
+            return
 
         g = self.grism_info
         if not g:
-            self.fitsimage.redraw()
+            self.fitsimage.redraw(whence=3)
             return
 
+        # these seem to be constant, can we get rid of them?
         samplefac = 1.0
         bin_x, bin_y = 1, 1
-        xoffset = getattr(self, "xoffset", 0)
-        yoffset = getattr(self, "yoffset", 0)
+        xoffset, yoffset = 0, 0
 
         y_center = self.fov_center[1] / bin_y / samplefac
         direct_wave = g.get('directwave', 0)
@@ -1115,32 +1045,29 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         if dispersion == 0:
             self.logger.error("Invalid dispersion: 0")
-            self.fitsimage.redraw()
+            self.fitsimage.redraw(whence=3)
             return
 
         tilt = (g.get('tilt1', 0) + g.get('tilt2', 0)) / 2
         bottom_length = (wave_start - direct_wave) / dispersion / bin_y / samplefac
         top_length = (direct_wave - wave_end) / dispersion / bin_y / samplefac
 
-        objects_to_draw = []
-        dash_groups = []
-
+        objects = []
         # --- Efficient "center-outward" dashed line drawing ---
 
         try:
             dash_text = (self.w.dash_interval.get_text() or "").strip().lower()
-            valid_intervals = {'50', '100', '150', '200', '250', '300'}
-            if dash_text in valid_intervals:
+            if dash_text in self.valid_intervals:
                 dash_interval = int(dash_text)
                 interval_y = dash_interval / bin_y / samplefac
 
                 for i, shape in enumerate(self.shapes):
-                    if shape.get('_deleted') or (shape.get('_excluded') and not getattr(self, 'show_excluded', False)):
+                    if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
                         continue
 
                     x = (shape['x'] - xoffset) / bin_x / samplefac
                     y = (shape['y'] - yoffset) / bin_y / samplefac
-                    if (y <= y_center and not self.cb_ch1.get_state()) or (y > y_center and not self.cb_ch2.get_state()):
+                    if (y <= y_center and not self.w.cb_ch1.get_state()) or (y > y_center and not self.w.cb_ch2.get_state()):
                         continue
 
                     width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
@@ -1161,7 +1088,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     x_end = x + width / 2
 
                     # Generate lines from center outwards
-                    dash_lines = []
                     for direction in [-1, 1]:  # up and down
                         offset = 0.0
                         while True:
@@ -1175,30 +1101,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                 linewidth=0.5,
                                 coord='data'
                             )
-                            dash_lines.append(line)
+                            objects.append(line)
                             offset += interval_y
-
-                    if dash_lines:
-                        group = self.dc.CompoundObject(*dash_lines)
-                        group.tag = f"dashline_bundle_{i}"
-                        dash_groups.append(group)
 
         except Exception as e:
             self.logger.warning(f"Dash line rendering skipped: {e}")
 
-        if dash_groups:
-            self.canvas.add(self.dc.CompoundObject(*dash_groups),
-                            tag="dashline_master")
-
         # --- Spectral Rectangles ---
         for i, shape in enumerate(self.shapes):
-            if shape.get('_deleted') or (shape.get('_excluded') and not getattr(self, 'show_excluded', False)):
+            if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
                 continue
 
             x, y = shape['x'], shape['y']
             xcen = (x - xoffset) / bin_x / samplefac
             ycen = (y - yoffset) / bin_y / samplefac
-            if (ycen <= y_center and not self.cb_ch1.get_state()) or (ycen > y_center and not self.cb_ch2.get_state()):
+            if (ycen <= y_center and not self.w.cb_ch1.get_state()) or (ycen > y_center and not self.w.cb_ch2.get_state()):
                 continue
 
             width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
@@ -1221,26 +1138,16 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 linewidth=1,
                 fill=False
             )
-            rect.coord = 'data'
-            rect.tag = f"spectrum_{'slit' if shape['type'].startswith('B') else 'hole'}_{i}"
-            objects_to_draw.append(rect)
+            objects.append(rect)
 
-        if objects_to_draw:
-            self.canvas.add(self.dc.CompoundObject(*objects_to_draw),
-                            tag="spectra_bundle")
+        if len(objects) > 0:
+            self.canvas.add(self.dc.CompoundObject(*objects),
+                            tag="spectra", redraw=False)
 
-        self.fitsimage.redraw()
-
-    def redraw_spectra(self):
-        self.draw_spectra()
+        self.fitsimage.redraw(whence=3)
 
     def dashline_change_cb(self, w, idx):
-        if idx > 0:
-            self.message_box('warning',
-                             "Spectral Dash Line Notice",
-                             "NOTE (!) Spectral dashed line rendering is under development.\n\n"
-                            "For stability, it is recommended to reset the interval to the default before using other functions.", parent=self.fv.w.root)
-        self.redraw_spectra()
+        self.draw_spectra()
 
     def save_mdp_file_cb(self, w, paths):
         if len(paths) == 0:
@@ -1271,8 +1178,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         content = dialog.get_content_area()
         content.remove_all(delete=True)
 
-        fov_x_ctr = self.w.fov_center_x.get_value()
-        fov_y_ctr = self.w.fov_center_y.get_value()
+        fov_x_ctr, fov_y_ctr = self.fov_center
         lbl = f"FOV center X: ({fov_x_ctr:.2f}), Y: ({fov_y_ctr:.2f})"
         content.add_widget(Widgets.Label(lbl))
         content.add_widget(Widgets.Label("Cancel and change up top if needed"))
@@ -1292,20 +1198,14 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return
         filename = paths[0]
 
-        pixscale = getattr(self, 'pixscale', 0.117000)
-        beta = getattr(self, 'beta', 0.29898169)
-        mos_rot = getattr(self, 'mos_rot', 0.0)
-        offset = np.deg2rad(mos_rot)
-        conversion = 0.015 / beta / 0.1038 * pixscale
-        fov_x_ctr = self.w.fov_center_x.get_value()
-        fov_y_ctr = self.w.fov_center_y.get_value()
+        offset = np.deg2rad(self.mos_rot_deg)
+        conversion = 0.015 / self.beta / 0.1038 * self.pixscale
+        fov_x_ctr, fov_y_ctr = self.fov_center
 
-        mdp_filename = getattr(self, 'mdp_filename', 'UNKNOWN_MDP')
-        image_name = getattr(self, 'image_name', 'UNKNOWN_IMAGE')
         try:
             with open(filename, 'w') as f:
-                f.write(f"# mdp: {mdp_filename}\n")
-                f.write(f"# Image: {image_name}\n")
+                f.write(f"# mdp: {self.mdp_filename}\n")
+                f.write(f"# Image: {self.fits_filename}\n")
                 f.write(f"# FOV Center: x={fov_x_ctr:.2f}, y={fov_y_ctr:.2f}\n")
                 shapes_filtered = [s for s in self.shapes if not s.get('_deleted')]
                 for i, shape in enumerate(shapes_filtered):
@@ -1324,7 +1224,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     x2_laser = x2_focus * 1.006
                     y1_laser = y1_focus * 1.006
                     y2_laser = y2_focus * 1.006
-                    if mos_rot != 0:
+                    if self.mos_rot_deg != 0:
                         r1 = np.hypot(x1_laser, y1_laser)
                         theta1 = np.arctan2(y1_laser, x1_laser)
                         x1_laser = r1 * np.cos(theta1 + offset)
@@ -1346,10 +1246,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                         self.message_box('warning', "Warning", f"Slit {i} is out of MOIRCS FOV.")
                         continue
                     if shape['type'].startswith('B'):
-                        width = (shape['length'] * pixscale / 2.06218 * 1.006) * 1.08826 - 0.126902
+                        width = (shape['length'] * self.pixscale / 2.06218 * 1.006) * 1.08826 - 0.126902
                         f.write(f"B,{x1_laser:9.4f},{y1_laser:9.4f},{x2_laser:9.4f},{y2_laser:9.4f},{width:9.4f}\n")
                     else:
-                        radius = shape['diameter'] / 2 * 0.015 / beta / 0.1038 * pixscale
+                        radius = shape['diameter'] / 2 * 0.015 / self.beta / 0.1038 * self.pixscale
                         f.write(f"C,{(x1_laser + x2_laser)/2:9.4f},{(y1_laser + y2_laser)/2:9.4f},{abs((x2_laser-x1_laser)/2):9.4f}\n")
         except IOError as e:
             self.message_box('critical', "Error", f"Failed to write SBR file: {str(e)}")
@@ -1384,15 +1284,27 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         p_canvas = self.fitsimage.get_canvas()
         if self.canvas not in p_canvas:
             p_canvas.add(self.canvas, tag='maskbuilder-canvas')
-        self.fitsimage.redraw()
+
+        self.redo()
 
     def stop(self):
-        self.canvas.delete_all_objects()
+        self.gui_up = False
         p_canvas = self.fitsimage.get_canvas()
-        p_canvas.delete_object(self.canvas)
-        self.shapes.clear()
-        self._undo_stack.clear()
-        self.remove_fov_overlay()
+        if self.canvas in p_canvas:
+            p_canvas.delete_object(self.canvas)
+
+    def redo(self):
+        # <-- FITS image is loaded
+        if not self.gui_up:
+            return
+
+        image = self.fitsimage.get_image()
+        if image is not None:
+            #self.set_fov_center_from_image(image)
+            path = image.get('path', 'UNKNOWN_IMAGE')
+            self.fits_filename = os.path.basename(path)
+
+        self.update_fov()
 
     def __str__(self):
         return 'moircs_mask_builder'

@@ -20,15 +20,6 @@ class CS_FOV:
             if hasattr(o, 'flip_x'):
                 o.flip_x(xcenter)
 
-    def remove(self):
-        for group in ['fov_base', 'det1_group', 'det2_group']:
-            if hasattr(self, group) and getattr(self, group):
-                try:
-                    self.canvas.delete_object(getattr(self, group))
-                except Exception as e:
-                    print(f"Error removing {group}: {e}")
-            setattr(self, group, None)
-
 class MOIRCS_FOV(CS_FOV):
     def __init__(self, canvas, pt):
         super().__init__(canvas, pt)
@@ -165,10 +156,21 @@ class MOIRCS_FOV(CS_FOV):
         self.__update()
 
     def scale_to_image(self, img_width, img_height):
-        print(f"Image dimensions: width={img_width}, height={img_height}; using fixed pixel scale {self.pixscale*3600:.3f} arcsec/pixel")
         self.__update()
 
     def rebuild(self):
         self.remove()
         self._build()
         self.__update()
+
+    def remove(self):
+        for obj in [self.fov_base, self.det1_group, self.det2_group]:
+            if obj is not None:
+                try:
+                    self.canvas.delete_object(obj)
+                except Exception as e:
+                    print(f"Error removing {group}: {e}")
+
+        self.fov_base = None
+        self.det1_group = None
+        self.det2_group = None
