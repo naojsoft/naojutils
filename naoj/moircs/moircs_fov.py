@@ -54,7 +54,7 @@ class MOIRCS_FOV(CS_FOV):
             x_offset - xr, y + yr + offset, text="MOIRCS FOV (3.9' x 6.95')", color='white', bgcolor='black', bgalpha=1.0
         )
         center_line = dc.Line(
-            x_offset - xr, y, x_offset + xr, y, color='yellow', linewidth=1
+            x_offset - xr, y, x_offset + xr, y, color='cyan', linewidth=1
         )
         self.fov_base = dc.CompoundObject(fov_circle, fov_label, center_line)
         self.canvas.add(self.fov_base)
@@ -71,11 +71,11 @@ class MOIRCS_FOV(CS_FOV):
         self.det1_group = dc.CompoundObject(det1_bottom, det1_left, det1_right, det1_top, label1)
 
         # Detector 2: 3 solid lines + 1 dashed line (bottom edge)
-        det2_top = dc.Line(x_offset - xr, y + offset + yr, x_offset + xr, y + offset + yr, color='yellow', linewidth=1)
-        det2_left = dc.Line(x_offset - xr, y - half_height, x_offset - xr, y + offset + yr, color='yellow', linewidth=1)
-        det2_right = dc.Line(x_offset + xr, y - half_height, x_offset + xr, y + offset + yr, color='yellow', linewidth=1)
+        det2_top = dc.Line(x_offset - xr, y + offset + yr, x_offset + xr, y + offset + yr, color='pink', linewidth=1)
+        det2_left = dc.Line(x_offset - xr, y - half_height, x_offset - xr, y + offset + yr, color='pink', linewidth=1)
+        det2_right = dc.Line(x_offset + xr, y - half_height, x_offset + xr, y + offset + yr, color='pink', linewidth=1)
         det2_bottom = dc.Line(x_offset - xr, y - half_height, x_offset + xr, y - half_height,
-                   color='yellow', linewidth=1, linestyle='dash')
+                   color='pink', linewidth=1, linestyle='dash')
         label2 = dc.Text(
             x_offset + xr, y + offset + (yr * self.text_off), text='Det 2', color='white', bgcolor='black', bgalpha=1.0
         )
@@ -155,7 +155,8 @@ class MOIRCS_FOV(CS_FOV):
         super().set_pa(pa_deg)
         self.__update()
 
-    def scale_to_image(self, img_width, img_height):
+    def set_pixscale(self, pixscale_arcsec):
+        self.pixscale = pixscale_arcsec / 3600.0
         self.__update()
 
     def rebuild(self):

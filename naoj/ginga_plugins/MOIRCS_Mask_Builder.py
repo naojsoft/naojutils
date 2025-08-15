@@ -126,6 +126,7 @@ import numpy as np
 from ginga.gw import Widgets
 from ginga import GingaPlugin
 from ginga.util.paths import icondir as ginga_icon_dir
+from ginga.util import wcs
 
 # local
 from naoj.moircs.moircs_fov import MOIRCS_FOV
@@ -141,7 +142,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         prefs = self.fv.get_preferences()
         self.settings = prefs.create_category('plugin_MOIRCS_Mask_Builder')
-        self.settings.add_defaults(display_slitID=True, grism='zJ500')
+        self.settings.add_defaults(display_slitID=True, grism='zJ500',
+                                   default_pixscale_arcsec=0.117)
         self.settings.load(onError='silent')
 
         self.grismtypes = list(grism_info_map.keys())
@@ -165,7 +167,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
 
-        self.pixscale = 0.117
+        self.pixscale = self.settings['default_pixscale_arcsec']
         self.beta = 0.29898169
         self.mos_rot_deg = 0.0
         self.mdp_filename = 'UNKNOWN_MDP'
@@ -244,11 +246,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.w.display_slit_id = Widgets.CheckBox("Slit/Hole ID")
         self.w.display_slit_id.set_tooltip("Show slit or hole id beside item")
+        self.w.display_slit_id.set_state(True)
         self.w.display_slit_id.add_callback('activated', lambda *args: self.draw_slits())
         hbox_sh_display.add_widget(self.w.display_slit_id, stretch=0)
 
         self.w.display_comments = Widgets.CheckBox("Comments")
         self.w.display_comments.set_tooltip("Show comments by slits")
+        self.w.display_comments.set_state(True)
         self.w.display_comments.add_callback('activated', lambda *args: self.draw_slits())
         hbox_sh_display.add_widget(self.w.display_comments, stretch=0)
 
@@ -523,6 +527,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         x = int(self.w.fov_center_x.get_value())
         y = int(self.w.fov_center_y.get_value())
         self.fov_center = (x, y)
+        self.fitsimage.set_pan(x, y)
         self.update_fov()
 
     def set_fov_center(self, x, y):
@@ -541,13 +546,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         ch1 = self.w.cb_ch1.get_state()
         ch2 = self.w.cb_ch2.get_state()
 
-        image = self.fitsimage.get_image()
-        if image is None:
-            width, height = int(2 * default_x_ctr), int(2 * default_y_ctr)
-        else:
-            width, height = image.get_size()
-        self.fov_overlay.scale_to_image(width, height)
         self.fov_overlay.set_pos(self.fov_center)
+        self.fov_overlay.set_pixscale(self.pixscale)
 
         # Safely remove detector groups if they exist on canvas
         for group in [self.fov_overlay.det1_group,
@@ -1299,11 +1299,31 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return
 
         image = self.fitsimage.get_image()
-        if image is not None:
+        if image is None:
+            self.pixscale = self.settings['default_pixscale_arcsec']
+            width, height = int(2 * default_x_ctr), int(2 * default_y_ctr)
+            self.fits_filename = 'UNKNOWN_IMAGE'
+        else:
             #self.set_fov_center_from_image(image)
             path = image.get('path', 'UNKNOWN_IMAGE')
             self.fits_filename = os.path.basename(path)
 
+            # figure out pixel scale
+            header = image.get_header()
+            try:
+                res = wcs.get_rotation_and_scale(header, skew_threshold=0.1)
+                rot_deg, cdelt1, cdelt2 = res
+                self.logger.debug(f"cdelt1={cdelt1:.8f}, cdelt2={cdelt2:.8f}")
+                # convert to arcsec/px
+                self.pixscale = np.max([np.fabs(cdelt1),
+                                        np.fabs(cdelt2)]) * 3600.0
+            except Exception as e:
+                self.logger.error(f"failed to get scale of image: {e}",
+                                  exc_info=True)
+                self.logger.info(f"setting pixel scale to {self.pixscale:.5f}")
+
+        x, y = self.fov_center
+        self.fitsimage.set_pan(x, y)
         self.update_fov()
 
     def __str__(self):
