@@ -93,9 +93,6 @@ A plugin to build masks for MOIRCS Instrument
 
 * Default is **none**.
 * Select a different Tick from the **Tick Marks** dropdown menu.
-* NOTE (!): Spectral dashed line rendering is under development.
-    * Intervals below 200 may degrade performance or impact other features.
-    * For stability, resetting to the default value is recommended before using other functions.
 
 **15. Grism Selection and Parameters**
 
@@ -121,6 +118,7 @@ import copy
 
 # 3rd party
 import numpy as np
+from astropy.units.quantity import Quantity
 
 # ginga
 from ginga.gw import Widgets
@@ -147,9 +145,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.settings.load(onError='silent')
 
         self.grismtypes = list(grism_info_map.keys())
-        self.grism_info_map = grism_info_map
         default_grism = self.settings.get('grism', 'zJ500')
-        self.grism_info = dict(self.grism_info_map.get(default_grism, {}))
+        self.grism_info = self.get_grism_info(default_grism)
 
         self.shapes = []  # Unified list for slits and holes
         self._undo_stack = []
@@ -350,19 +347,20 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # Float parameter input using TextEntries
         param_fields = (
-            "directwave", "wavestart", "waveend", "dispersion",
-            "zero_offset", "dx1", "dx2", "tilt1", "tilt2"
+            "directwave", "wavestart", "waveend", "dispersion1",
+            "dispersion2", "zero_offset", "dx1", "dx2", "tilt1", "tilt2"
         )
         labels = {
-            "directwave": "Direct Wave:",
-            "wavestart": "Wave Start:",
-            "waveend": "Wave End:",
-            "dispersion": "Dispersion:",
+            "directwave": "Direct Wave (\u212B):",
+            "wavestart": "Wave Start (\u212B):",
+            "waveend": "Wave End (\u212B):",
+            "dispersion1": "Dispersion DET 1 (\u212B/px):",
+            "dispersion2": "Dispersion DET 2 (\u212B/px):",
             "zero_offset": "Zero Offset:",
-            "dx1": "DX1:",
-            "dx2": "DX2:",
-            "tilt1": "Tilt 1:",
-            "tilt2": "Tilt 2:",
+            "dx1": "DX DET 1:",
+            "dx2": "DX DET 2:",
+            "tilt1": "Tilt DET 1:",
+            "tilt2": "Tilt DET 2:",
         }
 
         self.textentries = {}
@@ -760,12 +758,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # these are set so that x, y will always be the same as data_x, data_y
         # can we get rid of them?
-        samplefac = 1.0
         bin_x, bin_y = 1, 1
         xoffset, yoffset = 0, 0
 
-        x = data_x * bin_x * samplefac + xoffset
-        y = data_y * bin_y * samplefac + yoffset
+        x = data_x * bin_x + xoffset
+        y = data_y * bin_y + yoffset
 
         out_of_bounds = not self.is_within_fov_bounds(x, y) or not self.is_within_y_arcsec_limit(y)
         if out_of_bounds:
@@ -786,9 +783,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             comment = comment_field.get_text()
             shape = {'x': x, 'y': y, 'comment': comment}
             if out_of_bounds:
-                shape['_excluded'] = True  # Initially excluded from auto detection/export
+                # Initially excluded from auto detection/export
+                shape['_excluded'] = True
             if self._add_shape_type == 'slit':
-                shape.update({'type': 'B', 'width': 100, 'length': 7, 'angle': 0, 'priority': '1'})
+                shape.update({'type': 'B', 'width': 100,
+                              'length': 7, 'angle': 0, 'priority': '1'})
             else:
                 shape.update({'type': 'C', 'diameter': 30})
             self.shapes.append(shape)
@@ -915,7 +914,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def set_grism(self):
         grism_name = self.w['grism'].get_text()
         self.settings.set(dict(grism=grism_name))
-        self.grism_info = dict(self.grism_info_map.get(grism_name, {}))
+        self.grism_info = self.get_grism_info(grism_name)
 
         self._updating_grism_params = True
         for key, val in self.grism_info.items():
@@ -931,7 +930,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
     def reset_grism_params(self):
         grism_name = self.w['grism'].get_text()
-        original_info = self.grism_info_map.get(grism_name, {})
+        original_info = self.get_grism_info(grism_name)
 
         self._updating_grism_params = True
         for key in self.textentries:
@@ -948,12 +947,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         show_ids = self.w.display_slit_id.get_state()
         show_comments = self.w.display_comments.get_state()
         # these seem to be constant, can we omit them?
-        samplefac = 1.0
         bin_x, bin_y = 1, 1
         xoffset, yoffset = 0, 0
 
         # Use FOV center for channel assignment
-        y_center = self.fov_center[1] / bin_y / samplefac
+        y_center = self.fov_center[1] / bin_y
 
         objects = []
         for i, shape in enumerate(self.shapes):
@@ -964,8 +962,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             comment = shape.get('comment', '')
 
             # Convert image coords to canvas coords
-            xcen = (x - xoffset) / bin_x / samplefac
-            ycen = (y - yoffset) / bin_y / samplefac
+            xcen = (x - xoffset) / bin_x
+            ycen = (y - yoffset) / bin_y
 
             # Assign shape to CH1 (ycen <= y_center) or CH2 (ycen > y_center)
             is_ch1 = ycen <= y_center
@@ -979,8 +977,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             if shape['type'].startswith('B'):
                 # Draw slit (rectangle)
-                w = shape.get('width', 100.0) / bin_x / samplefac
-                l = shape.get('length', 7.0) / bin_y / samplefac
+                w = shape.get('width', 100.0) / bin_x
+                l = shape.get('length', 7.0) / bin_y
                 angle = shape.get('angle', 0)
                 rect = self.dc.Rectangle(
                     xcen - w / 2, ycen - l / 2,
@@ -991,27 +989,31 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 objects.append(rect)
 
                 if show_ids:
-                    objects.append(self.dc.Text(xcen, ycen + l / 2 + 10 / samplefac, text=f"{i}", color='white', fontsize=11))
+                    objects.append(self.dc.Text(xcen, ycen + l / 2 + 10,
+                                                text=f"{i}", color='white',
+                                                fontsize=11))
 
                 if show_comments and comment:
-                    comment_text = self.dc.Text(xcen, ycen - l / 2 - 30 / samplefac, text=comment, color='white')
+                    comment_text = self.dc.Text(xcen, ycen - l / 2 - 30,
+                                                text=comment, color='white')
                     objects.append(comment_text)
 
             elif shape['type'].startswith('C'):
                 # Draw hole (circle)
-                diameter = shape.get('diameter', 30.0) / samplefac
+                diameter = shape.get('diameter', 30.0)
                 radius = diameter / 2
                 objects.append(self.dc.Circle(xcen, ycen, radius,
                                               color='purple' if shape.get('_excluded') else 'yellow',
                                               linewidth=1))
 
                 if show_ids:
-                    objects.append(self.dc.Text(xcen, ycen + radius + 10 / samplefac,
-                                                text=f"{i}", color='yellow', fontsize=11))
+                    objects.append(self.dc.Text(xcen, ycen + radius + 10,
+                                                text=f"{i}", color='yellow',
+                                                fontsize=11))
 
                 if show_comments and comment:
                     objects.append(self.dc.Text(xcen,
-                                                ycen - radius - 30 / samplefac,
+                                                ycen - radius - 30,
                                                 text=comment, color='yellow'))
 
         if len(objects) > 0:
@@ -1032,113 +1034,93 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.fitsimage.redraw(whence=3)
             return
 
-        # these seem to be constant, can we get rid of them?
-        samplefac = 1.0
+        # these seem to be constant, and so result in just referencing
+        # the standard data space.  Can we get rid of them?
         bin_x, bin_y = 1, 1
         xoffset, yoffset = 0, 0
 
-        y_center = self.fov_center[1] / bin_y / samplefac
+        y_center = self.fov_center[1] / bin_y
         direct_wave = g.get('directwave', 0)
         wave_start = g.get('wavestart', 0)
         wave_end = g.get('waveend', 0)
-        dispersion = g.get('dispersion', 1)
+        dispersion1 = g.get('dispersion1', 1)
+        dispersion2 = g.get('dispersion2', 1)
 
-        if dispersion == 0:
+        if dispersion1 == 0 or dispersion2 == 0:
             self.logger.error("Invalid dispersion: 0")
             self.fitsimage.redraw(whence=3)
             return
 
-        tilt = (g.get('tilt1', 0) + g.get('tilt2', 0)) / 2
-        bottom_length = (wave_start - direct_wave) / dispersion / bin_y / samplefac
-        top_length = (direct_wave - wave_end) / dispersion / bin_y / samplefac
+        tilt = (g.get('tilt1', 0) + g.get('tilt2', 0)) * 0.5
 
         objects = []
+
+        dash_text = self.w.dash_interval.get_text().strip().lower()
+        dash_interval = None
+        if dash_text in self.valid_intervals:
+            dash_interval = int(dash_text)
+
         # --- Efficient "center-outward" dashed line drawing ---
+        def draw_dashes(objects, x, y, width, spec_y1, spec_y2,
+                        dash_interval, color):
+            interval_y = dash_interval / bin_y
+            # Clamp direction
+            ymin, ymax = sorted([spec_y1, spec_y2])
+            x_start = x - width * 0.5
+            x_end = x + width * 0.5
 
-        try:
-            dash_text = (self.w.dash_interval.get_text() or "").strip().lower()
-            if dash_text in self.valid_intervals:
-                dash_interval = int(dash_text)
-                interval_y = dash_interval / bin_y / samplefac
+            # Generate lines from center outwards
+            for direction in [-1, 1]:  # up and down
+                offset = 0.0
+                while True:
+                    y_pos = y + direction * offset
+                    if y_pos < ymin or y_pos > ymax:
+                        break
+                    line = self.dc.Line(x_start, y_pos, x_end, y_pos,
+                                        color=color, linewidth=1,
+                                        linestyle='dash')
+                    objects.append(line)
+                    offset += interval_y
 
-                for i, shape in enumerate(self.shapes):
-                    if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
-                        continue
-
-                    x = (shape['x'] - xoffset) / bin_x / samplefac
-                    y = (shape['y'] - yoffset) / bin_y / samplefac
-                    if (y <= y_center and not self.w.cb_ch1.get_state()) or (y > y_center and not self.w.cb_ch2.get_state()):
-                        continue
-
-                    width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
-                    width /= bin_x * samplefac
-
-                    if y > y_center:
-                        spec_y1 = y - top_length
-                        spec_y2 = y + bottom_length
-                        color = 'red'
-                    else:
-                        spec_y1 = y + top_length
-                        spec_y2 = y - bottom_length
-                        color = 'green'
-
-                    # Clamp direction
-                    ymin, ymax = sorted([spec_y1, spec_y2])
-                    x_start = x - width / 2
-                    x_end = x + width / 2
-
-                    # Generate lines from center outwards
-                    for direction in [-1, 1]:  # up and down
-                        offset = 0.0
-                        while True:
-                            y_pos = y + direction * offset
-                            if y_pos < ymin or y_pos > ymax:
-                                break
-                            line = self.dc.Line(
-                                x_start, y_pos,
-                                x_end, y_pos,
-                                color=color,
-                                linewidth=0.5,
-                                coord='data'
-                            )
-                            objects.append(line)
-                            offset += interval_y
-
-        except Exception as e:
-            self.logger.warning(f"Dash line rendering skipped: {e}")
-
-        # --- Spectral Rectangles ---
+        # --- Draw shapes ---
         for i, shape in enumerate(self.shapes):
             if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
                 continue
 
             x, y = shape['x'], shape['y']
-            xcen = (x - xoffset) / bin_x / samplefac
-            ycen = (y - yoffset) / bin_y / samplefac
+            xcen = (x - xoffset) / bin_x
+            ycen = (y - yoffset) / bin_y
             if (ycen <= y_center and not self.w.cb_ch1.get_state()) or (ycen > y_center and not self.w.cb_ch2.get_state()):
                 continue
 
             width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
-            width /= bin_x * samplefac
+            width /= bin_x
 
             if ycen > y_center:
+                # Detector 2
+                bottom_length = (wave_start - direct_wave) / dispersion2 / bin_y
+                top_length = (direct_wave - wave_end) / dispersion2 / bin_y
                 spec_y1 = ycen - top_length
                 spec_y2 = ycen + bottom_length
                 color = 'red'
             else:
+                # Detector 1
+                bottom_length = (wave_start - direct_wave) / dispersion1 / bin_y
+                top_length = (direct_wave - wave_end) / dispersion1 / bin_y
                 spec_y1 = ycen + top_length
                 spec_y2 = ycen - bottom_length
                 color = 'green'
 
-            rect = self.dc.Rectangle(
-                xcen - width / 2, spec_y1,
-                xcen + width / 2, spec_y2,
-                rotation_deg=tilt,
-                color=color,
-                linewidth=1,
-                fill=False
-            )
+            # --- Spectral Rectangle ---
+            rect = self.dc.Rectangle(xcen - width * 0.5, spec_y1,
+                                     xcen + width * 0.5, spec_y2,
+                                     rot_deg=tilt, color=color,
+                                     linewidth=1, fill=False)
             objects.append(rect)
+
+            if dash_interval is not None:
+                draw_dashes(objects, xcen, ycen, width, spec_y1, spec_y2,
+                            dash_interval, color)
 
         if len(objects) > 0:
             self.canvas.add(self.dc.CompoundObject(*objects),
@@ -1275,6 +1257,14 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         warn.add_callback('close', lambda w: w.hide())
         self.w.warning = warn
         warn.show()
+
+    def get_grism_info(self, grism_name):
+        info_dct = dict(grism_info_map.get(grism_name, {}))
+        for key, val in list(info_dct.items()):
+            # convert quantities to raw numbers
+            if isinstance(val, Quantity):
+                info_dct[key] = val.value
+        return info_dct
 
     def close(self):
         self.fv.stop_local_plugin(self.chname, str(self))
