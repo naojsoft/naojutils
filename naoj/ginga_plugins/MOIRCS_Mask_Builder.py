@@ -127,7 +127,6 @@ from ginga.util.paths import icondir as ginga_icon_dir
 from ginga.util import wcs
 
 # local
-from naoj.moircs.moircs_fov import MOIRCS_FOV
 from naoj.moircs.grism_info import grism_info_map
 
 # default center pixel (in FITS (1-based) indexing)
@@ -164,14 +163,16 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
 
-        self.pixscale = self.settings['default_pixscale_arcsec']
+        self.pixel_scale = self.settings['default_pixscale_arcsec']
+        self.pa_deg = 0.0
         self.beta = 0.29898169
         self.mos_rot_deg = 0.0
         self.mdp_filename = 'UNKNOWN_MDP'
         self.fits_filename = 'UNKNOWN_IMAGE'
-        self.valid_intervals = ['50', '100', '150', '200', '250', '300']
+        # unit of angstroms
+        self.valid_intervals = ['None', '100', '250', '500', '1000']
         self.fov_center = (default_x_ctr, default_y_ctr)
-        self.fov_overlay = MOIRCS_FOV(self.canvas, self.fov_center)
+        self.det_fov = [3.9, 3.9]  # detector dimensions in arcminute
         self.gui_up = False
 
     def build_gui(self, container):
@@ -317,12 +318,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # Spectra Dashed Line Interval Dropdown
         hbox_dashline = Widgets.HBox()
         hbox_dashline.set_spacing(6)
-        hbox_dashline.add_widget(Widgets.Label("Tick Marks (pixels):",
+        hbox_dashline.add_widget(Widgets.Label("Tick Marks (\u212B):",
                                                halign='right'), stretch=0)
 
-        self.w.dash_interval = Widgets.ComboBox()
+        self.w.dash_interval = Widgets.ComboBox(editable=True)
         self.w.dash_interval.set_tooltip("Show dashed lines in spectral dispersion boxes")
-        for val in ['none(default)'] + self.valid_intervals:
+        for val in self.valid_intervals:
             self.w.dash_interval.append_text(val)
         self.w.dash_interval.set_index(0)
         self.w.dash_interval.add_callback('activated', self.dashline_change_cb)
@@ -541,39 +542,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.set_fov_center(x_center, y_center)
 
     def update_fov(self):
-        ch1 = self.w.cb_ch1.get_state()
-        ch2 = self.w.cb_ch2.get_state()
-
-        self.fov_overlay.set_pos(self.fov_center)
-        self.fov_overlay.set_pixscale(self.pixscale)
-
-        # Safely remove detector groups if they exist on canvas
-        for group in [self.fov_overlay.det1_group,
-                      self.fov_overlay.det2_group,
-                      self.fov_overlay.fov_base]:
-            if group is not None and group in self.canvas:
-                try:
-                    self.canvas.delete_object(group)
-                    self.logger.debug(f"Removed group from canvas")
-                except Exception as e:
-                    self.logger.warning(f"Failed to remove group: {e}")
-
-        # Add groups based on ch1 and ch2
-        if ch1 and self.fov_overlay.det1_group is not None:
-            self.canvas.add(self.fov_overlay.det1_group, redraw=False)
-            self.logger.debug("Added det1_group to canvas")
-
-        if ch2 and self.fov_overlay.det2_group is not None:
-            self.canvas.add(self.fov_overlay.det2_group, redraw=False)
-            self.logger.debug("Added det2_group to canvas")
-
-        # Ensure fov_base is always present
-        if self.fov_overlay.fov_base is None:
-            self.logger.warning("fov_base is None; rebuilding overlay")
-            self.fov_overlay.rebuild()
-        else:
-            self.canvas.add(self.fov_overlay.fov_base, redraw=False)
-            self.logger.debug("Added fov_base to canvas")
+        self.draw_fov()
 
         # redraw everything else
         self.update_slits_spectra()
@@ -940,6 +909,50 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self._updating_grism_params = False
         self.draw_spectra()
 
+    def draw_fov(self):
+        xc, yc = self.fov_center
+        rot_deg = - self.pa_deg
+        self.canvas.delete_object_by_tag('fov', redraw=False)
+
+        # Apply 4 arcsecond leftward (-x) offset
+        xc -= 4.0 / 3600.0 / self.pixel_scale
+
+        radius_6 = (6.0 * 60) / self.pixel_scale * 0.5
+        radius_8 = (8.0 * 60) / self.pixel_scale * 0.5
+        c1 = self.dc.Circle(xc, yc, radius_6,
+                            linewidth=1, linestyle='solid', color='cyan')
+        c2 = self.dc.Circle(xc, yc, radius_8,
+                            linewidth=1, linestyle='solid', color='brown')
+        objs = [c1, c2]
+
+        # calc offset from center pixel to upper and lower box centers
+        offset = (1.5 * 60) / self.pixel_scale
+        r_wd = (self.det_fov[0] * 60) / self.pixel_scale * 0.5
+        r_ht = (self.det_fov[1] * 60) / self.pixel_scale * 0.5
+        if self.w.cb_ch1.get_state():
+            d1 = self.dc.Box(xc, yc - offset, r_wd, r_ht, rot_deg=rot_deg,
+                             linewidth=1, linestyle='solid', color='yellow')
+            t1 = self.dc.Text(xc + r_wd, yc - offset - r_ht, text="DET 1",
+                              color='yellow', bgcolor='black', bgalpha=1.0,
+                              rot_deg=rot_deg)
+            objs.extend([d1, t1])
+
+        if self.w.cb_ch2.get_state():
+            d2 = self.dc.Box(xc, yc + offset, r_wd, r_ht, rot_deg=rot_deg,
+                             linewidth=1, linestyle='solid', color='pink')
+            t2 = self.dc.Text(xc + r_wd, yc + offset + r_ht, text="DET 2",
+                              color='yellow', bgcolor='black', bgalpha=1.0,
+                              rot_deg=rot_deg)
+            objs.extend([d2, t2])
+        lc = self.dc.Line(xc - r_wd, yc, xc + r_wd, yc,
+                          linewidth=1, linestyle='dash', color='cyan')
+        objs.append(lc)
+        fov = self.dc.CompoundObject(*objs)
+        self.canvas.add(fov, tag='fov')
+        fov.rotate_deg([rot_deg], self.fov_center)
+
+        self.canvas.redraw(whence=3)
+
     def draw_slits(self):
         # Clear all slit, hole, and label objects
         self.canvas.delete_objects_by_tag(['slits'], redraw=False)
@@ -976,49 +989,51 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 continue
 
             if shape['type'].startswith('B'):
-                # Draw slit (rectangle)
-                w = shape.get('width', 100.0) / bin_x
-                l = shape.get('length', 7.0) / bin_y
-                angle = shape.get('angle', 0)
-                rect = self.dc.Rectangle(
-                    xcen - w / 2, ycen - l / 2,
-                    xcen + w / 2, ycen + l / 2,
-                    rotation_deg=angle,
-                    color='purple' if shape.get('_excluded') else 'white',
-                    linewidth=1)
-                objects.append(rect)
+                # Draw slit (box)
+                w = shape['width'] / bin_x
+                l = shape['length'] / bin_y
+                angle = shape.get('angle', 0.0) - self.pa_deg
+                color = 'purple' if shape.get('_excluded') else 'white'
+                box = self.dc.Box(xcen, ycen, w * 0.5, l * 0.5,
+                                  rot_deg=angle,
+                                  color=color, linewidth=1)
+                objects.append(box)
 
                 if show_ids:
                     objects.append(self.dc.Text(xcen, ycen + l / 2 + 10,
                                                 text=f"{i}", color='white',
-                                                fontsize=11))
+                                                fontsize=11, rot_deg=angle))
 
                 if show_comments and comment:
                     comment_text = self.dc.Text(xcen, ycen - l / 2 - 30,
-                                                text=comment, color='white')
+                                                text=comment, color='white',
+                                                rot_deg=angle)
                     objects.append(comment_text)
 
             elif shape['type'].startswith('C'):
                 # Draw hole (circle)
                 diameter = shape.get('diameter', 30.0)
                 radius = diameter / 2
+                angle = - self.pa_deg
+                color = 'purple' if shape.get('_excluded') else 'yellow'
                 objects.append(self.dc.Circle(xcen, ycen, radius,
-                                              color='purple' if shape.get('_excluded') else 'yellow',
-                                              linewidth=1))
+                                              color=color, linewidth=1))
 
                 if show_ids:
                     objects.append(self.dc.Text(xcen, ycen + radius + 10,
                                                 text=f"{i}", color='yellow',
-                                                fontsize=11))
+                                                fontsize=11, rot_deg=angle))
 
                 if show_comments and comment:
                     objects.append(self.dc.Text(xcen,
                                                 ycen - radius - 30,
-                                                text=comment, color='yellow'))
+                                                text=comment, color='yellow',
+                                                rot_deg=angle))
 
         if len(objects) > 0:
             self.canvas.add(self.dc.CompoundObject(*objects), tag='slits',
                             redraw=False)
+
         self.canvas.redraw(whence=3)
 
     def draw_spectra(self):
@@ -1057,13 +1072,16 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         dash_text = self.w.dash_interval.get_text().strip().lower()
         dash_interval = None
-        if dash_text in self.valid_intervals:
-            dash_interval = int(dash_text)
+        if dash_text != 'none' and len(dash_text) > 0:
+            try:
+                dash_interval = int(dash_text)
+            except ValueError:
+                # TODO: show an error
+                pass
 
         # --- Efficient "center-outward" dashed line drawing ---
         def draw_dashes(objects, x, y, width, spec_y1, spec_y2,
-                        dash_interval, color):
-            interval_y = dash_interval / bin_y
+                        interval_y, color):
             # Clamp direction
             ymin, ymax = sorted([spec_y1, spec_y2])
             x_start = x - width * 0.5
@@ -1095,6 +1113,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
             width /= bin_x
+            interval_y = 100
 
             if ycen > y_center:
                 # Detector 2
@@ -1102,6 +1121,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 top_length = (direct_wave - wave_end) / dispersion2 / bin_y
                 spec_y1 = ycen - top_length
                 spec_y2 = ycen + bottom_length
+                if dash_interval is not None:
+                    interval_y = dash_interval / dispersion2 / bin_y
                 color = 'red'
             else:
                 # Detector 1
@@ -1109,18 +1130,23 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 top_length = (direct_wave - wave_end) / dispersion1 / bin_y
                 spec_y1 = ycen + top_length
                 spec_y2 = ycen - bottom_length
+                if dash_interval is not None:
+                    interval_y = dash_interval / dispersion2 / bin_y
                 color = 'green'
 
             # --- Spectral Rectangle ---
-            rect = self.dc.Rectangle(xcen - width * 0.5, spec_y1,
-                                     xcen + width * 0.5, spec_y2,
-                                     rot_deg=tilt, color=color,
-                                     linewidth=1, fill=False)
-            objects.append(rect)
+            points = [(xcen - width * 0.5, spec_y1),
+                      (xcen + width * 0.5, spec_y1),
+                      (xcen + width * 0.5, spec_y2),
+                      (xcen - width * 0.5, spec_y2)]
+            # TODO: rotate points according to tilt?
+            poly = self.dc.Polygon(points, color=color,
+                                   linewidth=1, fill=False)
+            objects.append(poly)
 
             if dash_interval is not None:
                 draw_dashes(objects, xcen, ycen, width, spec_y1, spec_y2,
-                            dash_interval, color)
+                            interval_y, color)
 
         if len(objects) > 0:
             self.canvas.add(self.dc.CompoundObject(*objects),
@@ -1181,7 +1207,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         filename = paths[0]
 
         offset = np.deg2rad(self.mos_rot_deg)
-        conversion = 0.015 / self.beta / 0.1038 * self.pixscale
+        conversion = 0.015 / self.beta / 0.1038 * self.pixel_scale
         fov_x_ctr, fov_y_ctr = self.fov_center
 
         try:
@@ -1228,10 +1254,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                         self.message_box('warning', "Warning", f"Slit {i} is out of MOIRCS FOV.")
                         continue
                     if shape['type'].startswith('B'):
-                        width = (shape['length'] * self.pixscale / 2.06218 * 1.006) * 1.08826 - 0.126902
+                        width = (shape['length'] * self.pixel_scale / 2.06218 * 1.006) * 1.08826 - 0.126902
                         f.write(f"B,{x1_laser:9.4f},{y1_laser:9.4f},{x2_laser:9.4f},{y2_laser:9.4f},{width:9.4f}\n")
                     else:
-                        radius = shape['diameter'] / 2 * 0.015 / self.beta / 0.1038 * self.pixscale
+                        radius = shape['diameter'] / 2 * 0.015 / self.beta / 0.1038 * self.pixel_scale
                         f.write(f"C,{(x1_laser + x2_laser)/2:9.4f},{(y1_laser + y2_laser)/2:9.4f},{abs((x2_laser-x1_laser)/2):9.4f}\n")
         except IOError as e:
             self.message_box('critical', "Error", f"Failed to write SBR file: {str(e)}")
@@ -1290,7 +1316,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         image = self.fitsimage.get_image()
         if image is None:
-            self.pixscale = self.settings['default_pixscale_arcsec']
+            self.pixel_scale = self.settings['default_pixscale_arcsec']
             width, height = int(2 * default_x_ctr), int(2 * default_y_ctr)
             self.fits_filename = 'UNKNOWN_IMAGE'
         else:
@@ -1305,12 +1331,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 rot_deg, cdelt1, cdelt2 = res
                 self.logger.debug(f"cdelt1={cdelt1:.8f}, cdelt2={cdelt2:.8f}")
                 # convert to arcsec/px
-                self.pixscale = np.max([np.fabs(cdelt1),
+                self.pixel_scale = np.max([np.fabs(cdelt1),
                                         np.fabs(cdelt2)]) * 3600.0
             except Exception as e:
                 self.logger.error(f"failed to get scale of image: {e}",
                                   exc_info=True)
-                self.logger.info(f"setting pixel scale to {self.pixscale:.5f}")
+                self.logger.info(f"setting pixel scale to {self.pixel_scale:.5f}")
 
         x, y = self.fov_center
         self.fitsimage.set_pan(x, y)
