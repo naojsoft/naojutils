@@ -163,7 +163,14 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
 
+        compass = self.dc.Compass(0.10, 0.10, 0.08,
+                                  fontsize=14, coord='percentage',
+                                  color='orange')
+        self.canvas.add(compass, redraw=False)
+
         self.pixel_scale = self.settings['default_pixscale_arcsec']
+        self.image_pa_deg = 0.0
+        # our delta PA
         self.pa_deg = 0.0
         self.beta = 0.29898169
         self.mos_rot_deg = 0.0
@@ -172,7 +179,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # unit of angstroms
         self.valid_intervals = ['None', '100', '250', '500', '1000']
         self.fov_center = (default_x_ctr, default_y_ctr)
-        self.det_fov = [3.9, 3.9]  # detector dimensions in arcminute
+        self.det_fov = [4.0, 4.0]  # detector dimensions in arcminute
         self.gui_up = False
 
     def build_gui(self, container):
@@ -190,15 +197,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         hbox_fov = Widgets.HBox()
         hbox_fov.set_spacing(4)
-        hbox_fov.add_widget(Widgets.Label("MOIRCS FOV:"), stretch=0)
+        hbox_fov.add_widget(Widgets.Label("Detectors:"), stretch=0)
 
-        self.w.cb_ch1 = Widgets.CheckBox("CH1")
+        self.w.cb_ch1 = Widgets.CheckBox("Show DET 1")
         self.w.cb_ch1.set_state(True)
         self.w.cb_ch1.add_callback('activated',
                                    lambda w, tf: self.update_fov())
         hbox_fov.add_widget(self.w.cb_ch1, stretch=0)
 
-        self.w.cb_ch2 = Widgets.CheckBox("CH2")
+        self.w.cb_ch2 = Widgets.CheckBox("Show DET 2")
         self.w.cb_ch2.set_state(True)
         self.w.cb_ch2.add_callback('activated',
                                    lambda w, tf: self.update_fov())
@@ -227,6 +234,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_center.add_widget(btn_update, stretch=0)
         fov_controls.add_widget(hbox_center, stretch=0)
 
+        hbox = Widgets.HBox()
+        hbox.add_widget(Widgets.Label("Image PA:", halign='right'), stretch=0)
+        pa_lbl = Widgets.Label(f"{self.image_pa_deg:.1f}")
+        self.w.pa_lbl = pa_lbl
+        hbox.add_widget(pa_lbl, stretch=0)
+        hbox.add_widget(Widgets.Label("\u0394 PA (deg):", halign='right'), stretch=0)
+        self.w.pa_deg = Widgets.SpinBox(dtype=float)
+        self.w.pa_deg.set_limits(-180.0, 180.0, 1.0)
+        self.w.pa_deg.set_value(0.0)
+        self.w.pa_deg.set_tooltip("Set the delta to Position Angle of the field")
+        self.w.pa_deg.add_callback('value-changed', self.set_pa_cb)
+        hbox.add_widget(self.w.pa_deg, stretch=0)
+        hbox.add_widget(Widgets.Label(''), stretch=1)
+        fov_controls.add_widget(hbox, stretch=0)
+
         fr.set_widget(fov_controls)
         vbox.add_widget(fr, stretch=0)
 
@@ -245,13 +267,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.w.display_slit_id = Widgets.CheckBox("Slit/Hole ID")
         self.w.display_slit_id.set_tooltip("Show slit or hole id beside item")
         self.w.display_slit_id.set_state(True)
-        self.w.display_slit_id.add_callback('activated', lambda *args: self.draw_slits())
+        self.w.display_slit_id.add_callback('activated',
+                                            lambda *args: self.draw_slits())
         hbox_sh_display.add_widget(self.w.display_slit_id, stretch=0)
 
         self.w.display_comments = Widgets.CheckBox("Comments")
         self.w.display_comments.set_tooltip("Show comments by slits")
         self.w.display_comments.set_state(True)
-        self.w.display_comments.add_callback('activated', lambda *args: self.draw_slits())
+        self.w.display_comments.add_callback('activated',
+                                             lambda *args: self.draw_slits())
         hbox_sh_display.add_widget(self.w.display_comments, stretch=0)
 
         self.w.show_excluded = Widgets.CheckBox("Excluded")
@@ -347,22 +371,18 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         vbox_controls.add_widget(hbox_grism, stretch=0)
 
         # Float parameter input using TextEntries
-        param_fields = (
-            "directwave", "wavestart", "waveend", "dispersion1",
-            "dispersion2", "zero_offset", "dx1", "dx2", "tilt1", "tilt2"
-        )
-        labels = {
-            "directwave": "Direct Wave (\u212B):",
-            "wavestart": "Wave Start (\u212B):",
-            "waveend": "Wave End (\u212B):",
-            "dispersion1": "Dispersion DET 1 (\u212B/px):",
-            "dispersion2": "Dispersion DET 2 (\u212B/px):",
-            "zero_offset": "Zero Offset:",
-            "dx1": "DX DET 1:",
-            "dx2": "DX DET 2:",
-            "tilt1": "Tilt DET 1:",
-            "tilt2": "Tilt DET 2:",
-        }
+        param_fields = ["directwave", "wavestart", "waveend", "dispersion1",
+                        "dispersion2", "dx1", "dx2", "tilt1", "tilt2"]
+        labels = {"directwave": "Direct Wave (\u212B):",
+                  "wavestart": "Wave Start (\u212B):",
+                  "waveend": "Wave End (\u212B):",
+                  "dispersion1": "Dispersion DET 1 (\u212B/px):",
+                  "dispersion2": "Dispersion DET 2 (\u212B/px):",
+                  "dx1": "DX DET 1:",
+                  "dx2": "DX DET 2:",
+                  "tilt1": "Tilt DET 1:",
+                  "tilt2": "Tilt DET 2:",
+                  }
 
         self.textentries = {}
         grid = Widgets.GridBox()
@@ -526,7 +546,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         x = int(self.w.fov_center_x.get_value())
         y = int(self.w.fov_center_y.get_value())
         self.fov_center = (x, y)
-        self.fitsimage.set_pan(x, y)
+        # NOTE: account for FITS indexing vs. canvas indexing
+        self.fitsimage.set_pan(x - 1, y - 1)
         self.update_fov()
 
     def set_fov_center(self, x, y):
@@ -539,7 +560,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if image is not None:
             width, height = image.get_size()
             x, y = int(width * 0.5), int(height * 0.5)
-            self.set_fov_center(x_center, y_center)
+            # NOTE: account for FITS indexing vs. canvas indexing
+            self.set_fov_center(x_center + 1, y_center + 1)
 
     def update_fov(self):
         self.draw_fov()
@@ -579,6 +601,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     continue
                 row_dict = {
                     'type': parts[6].strip(),
+                    # NOTE: X and Y are 1-based (FITS standard) in the MDP file
+                    # but Ginga uses 0-based indexing
                     'x': float(parts[0]),
                     'y': float(parts[1]),
                     'width': float(parts[2]),
@@ -694,46 +718,36 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.canvas.ui_set_active(True, viewer=self.fitsimage)
 
     def is_within_fov_bounds(self, x, y):
-        """Check if (x, y) is within MOIRCS rectangle in x, and circle radius in y."""
-        if self.fov_overlay is None:
-            self.logger.warning("FOV overlay not initialized; assuming position is valid.")
-            return True
+        """Check if (x, y) is within MOIRCS rectangle in x, and
+        circle radius in y."""
+        # Rectangle half-width in pixels
+        xr = (self.det_fov[0] * 60) / self.pixel_scale * 0.5
+        # Circle radius in pixels
+        radius_6 = (6.0 * 60) / self.pixel_scale * 0.5
 
-        x_center, y_center = self.fov_center  # Use self.fov_center for consistency
-        fov = self.fov_overlay
-        pixscale = fov.pixscale  # deg/pixel
-        xr = (fov.moircs_fov[0] * 0.5) / pixscale  # Rectangle half-width in pixels
-        radius_pix = fov.circle_radius_deg / pixscale  # Circle radius in pixels
-
+        x_center, y_center = self.fov_center
         within_x = (x_center - xr) <= x <= (x_center + xr)
         r = np.hypot(x - x_center, y - y_center)
-        within_radius = r <= radius_pix
+        within_radius = r <= radius_6
         return within_x and within_radius
 
     def is_within_y_arcsec_limit(self, y, min_arcsec_from_center=10):
         """Ensure the slit/hole is at least +/- min_arcsec_from_center from the centerline."""
-        if not hasattr(self, 'fov_center') or not hasattr(self, 'fov_overlay'):
-            self.logger.warning("FOV center or overlay not initialized; assuming position is valid.")
-            return True
-
         y_center = self.fov_center[1]
-        min_pixel_dist = min_arcsec_from_center / (self.fov_overlay.pixscale * 3600)
-        return abs(y - y_center) >= min_pixel_dist
+        min_pixel_dist = min_arcsec_from_center / 3600.0 / self.pixel_scale
+        return np.fabs(y - y_center) >= min_pixel_dist
 
     def _on_click_event(self, canvas, button, data_x, data_y):
         self.canvas.set_draw_mode(None)
         self.canvas.remove_callback('button-press', self._on_click_event)
         self.canvas.ui_set_active(False, viewer=self.fitsimage)
 
-        # these are set so that x, y will always be the same as data_x, data_y
-        # can we get rid of them?
-        bin_x, bin_y = 1, 1
-        xoffset, yoffset = 0, 0
+        # convert canvas coords to FITS coords
+        x = data_x + 1
+        y = data_y + 1
 
-        x = data_x * bin_x + xoffset
-        y = data_y * bin_y + yoffset
-
-        out_of_bounds = not self.is_within_fov_bounds(x, y) or not self.is_within_y_arcsec_limit(y)
+        out_of_bounds = (not self.is_within_fov_bounds(x, y) or
+                         not self.is_within_y_arcsec_limit(y))
         if out_of_bounds:
             self.message_box('warning', "Out of Bounds", "The selected position is outside the allowed FOV, but it will be added.")
 
@@ -910,12 +924,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.draw_spectra()
 
     def draw_fov(self):
-        xc, yc = self.fov_center
+        # NOTE: account for FITS indexing vs. canvas indexing
+        fov_center_g = np.array(self.fov_center) - 1
+        xc, yc = fov_center_g
         rot_deg = - self.pa_deg
         self.canvas.delete_object_by_tag('fov', redraw=False)
 
         # Apply 4 arcsecond leftward (-x) offset
-        xc -= 4.0 / 3600.0 / self.pixel_scale
+        # Ichi-san says this might only need to happen at the MDP=>SBR time
+        #xc -= 4.0 / 3600.0 / self.pixel_scale
 
         radius_6 = (6.0 * 60) / self.pixel_scale * 0.5
         radius_8 = (8.0 * 60) / self.pixel_scale * 0.5
@@ -923,7 +940,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                             linewidth=1, linestyle='solid', color='cyan')
         c2 = self.dc.Circle(xc, yc, radius_8,
                             linewidth=1, linestyle='solid', color='brown')
-        objs = [c1, c2]
+
+        # mark the center
+        p1 = self.dc.Point(xc, yc, radius=15, style='cross',
+                           linewidth=1, linestyle='solid', color='cyan')
+        objs = [c1, c2, p1]
 
         # calc offset from center pixel to upper and lower box centers
         offset = (1.5 * 60) / self.pixel_scale
@@ -941,15 +962,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             d2 = self.dc.Box(xc, yc + offset, r_wd, r_ht, rot_deg=rot_deg,
                              linewidth=1, linestyle='solid', color='pink')
             t2 = self.dc.Text(xc + r_wd, yc + offset + r_ht, text="DET 2",
-                              color='yellow', bgcolor='black', bgalpha=1.0,
+                              color='pink', bgcolor='black', bgalpha=1.0,
                               rot_deg=rot_deg)
             objs.extend([d2, t2])
         lc = self.dc.Line(xc - r_wd, yc, xc + r_wd, yc,
                           linewidth=1, linestyle='dash', color='cyan')
         objs.append(lc)
         fov = self.dc.CompoundObject(*objs)
-        self.canvas.add(fov, tag='fov')
-        fov.rotate_deg([rot_deg], self.fov_center)
+        self.canvas.add(fov, tag='fov', redraw=False)
+        fov.rotate_deg([rot_deg], fov_center_g)
 
         self.canvas.redraw(whence=3)
 
@@ -959,12 +980,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         show_ids = self.w.display_slit_id.get_state()
         show_comments = self.w.display_comments.get_state()
-        # these seem to be constant, can we omit them?
-        bin_x, bin_y = 1, 1
-        xoffset, yoffset = 0, 0
+        rot_deg = - self.pa_deg
 
-        # Use FOV center for channel assignment
-        y_center = self.fov_center[1] / bin_y
+        # NOTE: convert FITS image coords to canvas coords
+        fov_center_g = np.array(self.fov_center) - 1
+        y_center = fov_center_g[1]
 
         objects = []
         for i, shape in enumerate(self.shapes):
@@ -974,9 +994,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             x, y = shape['x'], shape['y']
             comment = shape.get('comment', '')
 
-            # Convert image coords to canvas coords
-            xcen = (x - xoffset) / bin_x
-            ycen = (y - yoffset) / bin_y
+            # Convert FITS image coords to canvas coords
+            xcen = x - 1
+            ycen = y - 1
 
             # Assign shape to CH1 (ycen <= y_center) or CH2 (ycen > y_center)
             is_ch1 = ycen <= y_center
@@ -990,8 +1010,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             if shape['type'].startswith('B'):
                 # Draw slit (box)
-                w = shape['width'] / bin_x
-                l = shape['length'] / bin_y
+                w = shape['width']
+                l = shape['length']
                 angle = shape.get('angle', 0.0) - self.pa_deg
                 color = 'purple' if shape.get('_excluded') else 'white'
                 box = self.dc.Box(xcen, ycen, w * 0.5, l * 0.5,
@@ -1031,8 +1051,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                                 rot_deg=angle))
 
         if len(objects) > 0:
-            self.canvas.add(self.dc.CompoundObject(*objects), tag='slits',
-                            redraw=False)
+            slits = self.dc.CompoundObject(*objects)
+            self.canvas.add(slits, tag='slits', redraw=False)
+            slits.rotate_deg([rot_deg], fov_center_g)
 
         self.canvas.redraw(whence=3)
 
@@ -1049,24 +1070,25 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.fitsimage.redraw(whence=3)
             return
 
-        # these seem to be constant, and so result in just referencing
-        # the standard data space.  Can we get rid of them?
-        bin_x, bin_y = 1, 1
-        xoffset, yoffset = 0, 0
+        # NOTE: convert FITS image coords to canvas coords
+        fov_center_g = np.array(self.fov_center) - 1
 
-        y_center = self.fov_center[1] / bin_y
+        rot_deg = - self.pa_deg
+        y_center = fov_center_g[1]
         direct_wave = g.get('directwave', 0)
         wave_start = g.get('wavestart', 0)
         wave_end = g.get('waveend', 0)
         dispersion1 = g.get('dispersion1', 1)
         dispersion2 = g.get('dispersion2', 1)
+        dx1 = g.get('dx1', 0)
+        dx2 = g.get('dx2', 0)
+        tilt1 = g.get('tilt1', 0.0)
+        tilt2 = g.get('tilt2', 0.0)
 
         if dispersion1 == 0 or dispersion2 == 0:
             self.logger.error("Invalid dispersion: 0")
             self.fitsimage.redraw(whence=3)
             return
-
-        tilt = (g.get('tilt1', 0) + g.get('tilt2', 0)) * 0.5
 
         objects = []
 
@@ -1081,7 +1103,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # --- Efficient "center-outward" dashed line drawing ---
         def draw_dashes(objects, x, y, width, spec_y1, spec_y2,
-                        interval_y, color):
+                        interval_y, color, tilt_deg):
             # Clamp direction
             ymin, ymax = sorted([spec_y1, spec_y2])
             x_start = x - width * 0.5
@@ -1096,7 +1118,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                         break
                     line = self.dc.Line(x_start, y_pos, x_end, y_pos,
                                         color=color, linewidth=1,
-                                        linestyle='dash')
+                                        linestyle='dash', coord='data')
+                    line.crdmap = self.fitsimage.get_coordmap('data')
+                    line.rotate_deg([tilt_deg], (x, y))
                     objects.append(line)
                     offset += interval_y
 
@@ -1105,34 +1129,39 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
                 continue
 
-            x, y = shape['x'], shape['y']
-            xcen = (x - xoffset) / bin_x
-            ycen = (y - yoffset) / bin_y
-            if (ycen <= y_center and not self.w.cb_ch1.get_state()) or (ycen > y_center and not self.w.cb_ch2.get_state()):
+            # NOTE: account for FITS indexing vs. canvas indexing
+            xcen, ycen = shape['x'] - 1, shape['y'] - 1
+            # apply DX offset
+            is_det1 = (ycen <= y_center)
+            xcen += dx1 if is_det1 else dx2
+
+            # skip drawing if user doesn't want to see this detector
+            if (is_det1 and not self.w.cb_ch1.get_state()) or (not is_det1 and not self.w.cb_ch2.get_state()):
                 continue
 
             width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
-            width /= bin_x
             interval_y = 100
 
-            if ycen > y_center:
-                # Detector 2
-                bottom_length = (wave_start - direct_wave) / dispersion2 / bin_y
-                top_length = (direct_wave - wave_end) / dispersion2 / bin_y
-                spec_y1 = ycen - top_length
-                spec_y2 = ycen + bottom_length
-                if dash_interval is not None:
-                    interval_y = dash_interval / dispersion2 / bin_y
-                color = 'red'
-            else:
+            if is_det1:
                 # Detector 1
-                bottom_length = (wave_start - direct_wave) / dispersion1 / bin_y
-                top_length = (direct_wave - wave_end) / dispersion1 / bin_y
+                bottom_length = (wave_start - direct_wave) / dispersion1
+                top_length = (direct_wave - wave_end) / dispersion1
                 spec_y1 = ycen + top_length
                 spec_y2 = ycen - bottom_length
                 if dash_interval is not None:
-                    interval_y = dash_interval / dispersion2 / bin_y
+                    interval_y = dash_interval / dispersion2
                 color = 'green'
+                tilt_deg = tilt1
+            else:
+                # Detector 2
+                bottom_length = (wave_start - direct_wave) / dispersion2
+                top_length = (direct_wave - wave_end) / dispersion2
+                spec_y1 = ycen - top_length
+                spec_y2 = ycen + bottom_length
+                if dash_interval is not None:
+                    interval_y = dash_interval / dispersion2
+                color = 'red'
+                tilt_deg = tilt2
 
             # --- Spectral Rectangle ---
             points = [(xcen - width * 0.5, spec_y1),
@@ -1141,28 +1170,34 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                       (xcen - width * 0.5, spec_y2)]
             # TODO: rotate points according to tilt?
             poly = self.dc.Polygon(points, color=color,
-                                   linewidth=1, fill=False)
+                                   linewidth=1, fill=False, coord='data')
+            poly.crdmap = self.fitsimage.get_coordmap('data')
+            poly.rotate_deg([tilt_deg], (xcen, ycen))
             objects.append(poly)
 
             if dash_interval is not None:
                 draw_dashes(objects, xcen, ycen, width, spec_y1, spec_y2,
-                            interval_y, color)
+                            interval_y, color, tilt_deg)
 
         if len(objects) > 0:
-            self.canvas.add(self.dc.CompoundObject(*objects),
-                            tag="spectra", redraw=False)
+            spectra = self.dc.CompoundObject(*objects)
+            self.canvas.add(spectra, tag="spectra", redraw=False)
+            spectra.rotate_deg([rot_deg], fov_center_g)
 
         self.fitsimage.redraw(whence=3)
 
     def dashline_change_cb(self, w, idx):
         self.draw_spectra()
 
+    def set_pa_cb(self, w, val):
+        self.pa_deg = val
+        self.update_fov()
+
     def save_mdp_file_cb(self, w, paths):
         if len(paths) == 0:
             return
         filename = paths[0]
 
-        img_h = self.fitsimage.get_data_size()[1]
         with open(filename, 'w') as f:
             for shape in self.shapes:
                 x = shape['x']
@@ -1319,6 +1354,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.pixel_scale = self.settings['default_pixscale_arcsec']
             width, height = int(2 * default_x_ctr), int(2 * default_y_ctr)
             self.fits_filename = 'UNKNOWN_IMAGE'
+
+            self.image_pa_deg = 0.0
         else:
             #self.set_fov_center_from_image(image)
             path = image.get('path', 'UNKNOWN_IMAGE')
@@ -1327,16 +1364,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             # figure out pixel scale
             header = image.get_header()
             try:
-                res = wcs.get_rotation_and_scale(header, skew_threshold=0.1)
-                rot_deg, cdelt1, cdelt2 = res
+                res = wcs.get_xy_rotation_and_scale(header)
+                (xrot_deg, yrot_deg), (cdelt1, cdelt2) = res
                 self.logger.debug(f"cdelt1={cdelt1:.8f}, cdelt2={cdelt2:.8f}")
                 # convert to arcsec/px
                 self.pixel_scale = np.max([np.fabs(cdelt1),
                                         np.fabs(cdelt2)]) * 3600.0
+
+                self.image_pa_deg = xrot_deg
+
             except Exception as e:
                 self.logger.error(f"failed to get scale of image: {e}",
                                   exc_info=True)
-                self.logger.info(f"setting pixel scale to {self.pixel_scale:.5f}")
+
+        self.w.pa_lbl.set_text(f"{self.image_pa_deg:.1f}")
+        self.logger.info(f"setting pixel scale to {self.pixel_scale:.5f}")
 
         x, y = self.fov_center
         self.fitsimage.set_pan(x, y)
