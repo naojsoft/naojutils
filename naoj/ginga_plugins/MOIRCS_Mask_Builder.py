@@ -128,6 +128,7 @@ from ginga.util import wcs
 
 # local
 from naoj.moircs.grism_info import grism_info_map
+from naoj.moircs import mdp
 
 # default center pixel (in FITS (1-based) indexing)
 default_x_ctr, default_y_ctr = (1084, 1786)
@@ -590,33 +591,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.update_slits_spectra()
 
     def load_mdp(self, filepath):
-        rows = []
-        with open(filepath, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                parts = line.split()
-                if len(parts) < 7:
-                    continue
-                row_dict = {
-                    'type': parts[6].strip(),
-                    # NOTE: X and Y are 1-based (FITS standard) in the MDP file
-                    # but Ginga uses 0-based indexing
-                    'x': float(parts[0]),
-                    'y': float(parts[1]),
-                    'width': float(parts[2]),
-                    'length': float(parts[3]),
-                    'angle': float(parts[4]),
-                    'priority': parts[5],
-                    'comment': " ".join(parts[7:]) if len(parts) > 7 else ''
-                }
-                if row_dict['type'].startswith('C'):
-                    row_dict['diameter'] = row_dict.pop('width')
-                    row_dict.pop('length')
-                    row_dict.pop('angle')
-                rows.append(row_dict)
-
+        rows = mdp.load_mdp(filepath)
         self.shapes = rows
         self._undo_stack = []
 
@@ -1235,67 +1210,38 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # ok-- go ahead and show the Save SBR dialog
         self.w.save_sbr.popup()
 
+    def write_sbr_file(self, path):
+        try:
+            shapes_filtered = [s for s in self.shapes
+                               if not s.get('_deleted')]
+
+            tbl = mdp.rows2table(shapes_filtered)
+            buf, warnings = mdp.table2sbr(tbl, self.fov_center,
+                                          self.pixel_scale)
+
+            for warn_str in warnings:
+                self.message_box('warning', "Warning", warn_str)
+
+            fov_x_ctr, fov_y_ctr = self.fov_center
+
+            with open(path, 'w') as out_f:
+                out_f.write(f"# MDP: {self.mdp_filename}\n")
+                out_f.write(f"# Image: {self.fits_filename}\n")
+                out_f.write(f"# FOV Center: x={fov_x_ctr:.2f}, y={fov_y_ctr:.2f}\n")
+                out_f.write(buf)
+
+        except IOError as e:
+            self.message_box('critical', "Error", f"Failed to write SBR file: {str(e)}")
+        else:
+            self.message_box('info', "Status", f"Wrote SBR file: {path}")
+
     def save_sbr_file_cb(self, w, paths):
         if len(paths) == 0:
             # cancel
             return
-        filename = paths[0]
 
-        offset = np.deg2rad(self.mos_rot_deg)
-        conversion = 0.015 / self.beta / 0.1038 * self.pixel_scale
-        fov_x_ctr, fov_y_ctr = self.fov_center
-
-        try:
-            with open(filename, 'w') as f:
-                f.write(f"# mdp: {self.mdp_filename}\n")
-                f.write(f"# Image: {self.fits_filename}\n")
-                f.write(f"# FOV Center: x={fov_x_ctr:.2f}, y={fov_y_ctr:.2f}\n")
-                shapes_filtered = [s for s in self.shapes if not s.get('_deleted')]
-                for i, shape in enumerate(shapes_filtered):
-                    x = shape['x']
-                    y = shape['y']
-                    sl_l = shape['width'] * 0.5 if shape['type'].startswith('B') else shape['diameter'] * 0.5
-                    x1_off = x - sl_l - fov_x_ctr
-                    x2_off = x + sl_l - fov_x_ctr
-                    y1_off = y - fov_y_ctr
-                    y2_off = y - fov_y_ctr
-                    x1_focus = -x1_off * conversion
-                    x2_focus = -x2_off * conversion
-                    y1_focus = y1_off * conversion
-                    y2_focus = y2_off * conversion
-                    x1_laser = x1_focus * 1.006
-                    x2_laser = x2_focus * 1.006
-                    y1_laser = y1_focus * 1.006
-                    y2_laser = y2_focus * 1.006
-                    if self.mos_rot_deg != 0:
-                        r1 = np.hypot(x1_laser, y1_laser)
-                        theta1 = np.arctan2(y1_laser, x1_laser)
-                        x1_laser = r1 * np.cos(theta1 + offset)
-                        y1_laser = r1 * np.sin(theta1 + offset)
-                        r2 = np.hypot(x2_laser, y2_laser)
-                        theta2 = np.arctan2(y2_laser, x2_laser)
-                        x2_laser = r2 * np.cos(theta2 + offset)
-                        y2_laser = r2 * np.sin(theta2 + offset)
-                    corners_r = np.array([
-                        np.hypot(x1_focus, y1_focus),
-                        np.hypot(x1_focus, y2_focus),
-                        np.hypot(x2_focus, y1_focus),
-                        np.hypot(x2_focus, y2_focus)
-                    ])
-                    if np.any(corners_r > 90):
-                        self.message_box('warning', "Warning", f"{'Slit' if shape['type'].startswith('B') else 'Hole'} {i} is out of laser FOV.")
-                        continue
-                    if shape['type'].startswith('B') and np.any(np.abs([x1_focus, x2_focus]) > 60):
-                        self.message_box('warning', "Warning", f"Slit {i} is out of MOIRCS FOV.")
-                        continue
-                    if shape['type'].startswith('B'):
-                        width = (shape['length'] * self.pixel_scale / 2.06218 * 1.006) * 1.08826 - 0.126902
-                        f.write(f"B,{x1_laser:9.4f},{y1_laser:9.4f},{x2_laser:9.4f},{y2_laser:9.4f},{width:9.4f}\n")
-                    else:
-                        radius = shape['diameter'] / 2 * 0.015 / self.beta / 0.1038 * self.pixel_scale
-                        f.write(f"C,{(x1_laser + x2_laser)/2:9.4f},{(y1_laser + y2_laser)/2:9.4f},{abs((x2_laser-x1_laser)/2):9.4f}\n")
-        except IOError as e:
-            self.message_box('critical', "Error", f"Failed to write SBR file: {str(e)}")
+        path = paths[0]
+        self.write_sbr_file(path)
 
     def message_box(self, category, title, message, parent=None):
         warn = Widgets.Dialog(title=title, modal=False,
