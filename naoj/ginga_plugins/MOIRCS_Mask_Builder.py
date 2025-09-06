@@ -240,6 +240,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         pa_lbl = Widgets.Label(f"{self.image_pa_deg:.1f}")
         self.w.pa_lbl = pa_lbl
         hbox.add_widget(pa_lbl, stretch=0)
+        hbox.add_widget(Widgets.Label(""), stretch=1)
         hbox.add_widget(Widgets.Label("\u0394 PA (deg):", halign='right'), stretch=0)
         self.w.pa_deg = Widgets.SpinBox(dtype=float)
         self.w.pa_deg.set_limits(-180.0, 180.0, 1.0)
