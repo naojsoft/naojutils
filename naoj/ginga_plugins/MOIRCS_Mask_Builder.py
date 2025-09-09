@@ -3,9 +3,13 @@ A plugin to build masks for MOIRCS Instrument
 
 **Plugin Type:** Local
 
-`MOIRCS Mask Builder` is a local plugin, which means it is associated with a channel. An instance can be opened for each channel.
+`MOIRCS Mask Builder` is a local plugin, which means it is associated with
+a channel. An instance can be opened for each channel.
 
-.. note:: This plugin is intended to replace the legacy MDP system. It supports loading and saving of `.mdp` and `.sbr` mask definition files and offers interactive slit and alignment hole editing capabilities on astronomical images with valid WCS.
+.. note:: This plugin is intended to replace the legacy IDL-based Mask
+          Design Program. It supports loading and saving of `.mdp` and `.sbr`
+          mask definition files and offers interactive slit and alignment
+          hole editing capabilities on astronomical images with valid WCS.
 
 **Usage**
 
@@ -16,18 +20,21 @@ A plugin to build masks for MOIRCS Instrument
 
 **2. Launch the Plugin**
 
-* Go to `Plugins > Subaru > Planning > MOIRCS Mask Builder` to activate the plugin panel for the current channel.
+* Go to `Plugins > Subaru > Planning > MOIRCS Mask Builder` to activate
+  the plugin panel for the current channel.
 
 **3. Load an MDP File**
 
 * Click the **Browse** button in the plugin.
 * Select an existing `.mdp` file containing mask information.
-* Click **Load** to populate the slit/hole list and overlay elements on the image.
+* Click **Load** to populate the slit/hole list and overlay elements on
+  the image.
 
 **4. Toggle Detector Channels (New!)**
 
 * Both channels (Ch1 and Ch2) are shown by default.
-* To view channels separately, uncheck the desired channel checkboxes to hide them.
+* To view channels separately, uncheck the desired channel checkboxes to
+  hide them.
 
 **5. Set the Field of View (FOV) Center**
 
@@ -46,7 +53,8 @@ A plugin to build masks for MOIRCS Instrument
 
 * Click **Show Slit List** to open the full list of defined slits and holes.
 * Items are displayed in ID order.
-* You can toggle visibility or mark items for deletion (unchecked items will be commented out when saving).
+* You can toggle visibility or mark items for deletion (unchecked items
+  will be commented out when saving).
 
 **8. Auto Detection (New!)**
 
@@ -78,16 +86,19 @@ A plugin to build masks for MOIRCS Instrument
 **11. Delete Slits or Holes**
 
 * Open **Show Slit List**.
-* Uncheck any item to exclude it from future saves (these will be commented out in the `.mdp` file).
+* Uncheck any item to exclude it from future saves (these will be commented
+  out in the `.mdp` file).
 
 **12. Undo Support (New!)**
 
-* Basic undo functionality is now available for recent **Add** and **Edit** actions.
+* Basic undo functionality is now available for recent **Add** and **Edit**
+  actions.
 * Revert your last action with one click.
 
 **13. Toggle Spectral Footprint (New!)**
 
-* Use the **Spectra** checkbox to enable or disable overlaid spectra for slits, improving visibility for mask layout.
+* Use the **Spectra** checkbox to enable or disable overlaid spectra for
+  slits, improving visibility for mask layout.
 
 **14. Tick Mark selection**
 
@@ -98,7 +109,8 @@ A plugin to build masks for MOIRCS Instrument
 
 * Default grism is **Zj500**.
 * Select a different grism from the **Grism** dropdown menu.
-* To adjust grism parameters (e.g., tilt, dispersion), enter numeric values in the corresponding fields and press **Update**.
+* To adjust grism parameters (e.g., tilt, dispersion), enter numeric values
+  in the corresponding fields and press **Update**.
 
 **16. Save to .mdp**
 
@@ -109,7 +121,8 @@ A plugin to build masks for MOIRCS Instrument
 
 * Click **Save SBR**.
 * Confirm filename and FOV center (auto-filled from current settings).
-* Header info includes the original `.mdp` file name and current center coordinates.
+* Header info includes the original `.mdp` file name and current center
+  coordinates.
 
 """
 # stdlib
@@ -173,8 +186,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.image_pa_deg = 0.0
         # our delta PA
         self.pa_deg = 0.0
-        self.beta = 0.29898169
-        self.mos_rot_deg = 0.0
         self.mdp_filename = 'UNKNOWN_MDP'
         self.fits_filename = 'UNKNOWN_IMAGE'
         # unit of angstroms

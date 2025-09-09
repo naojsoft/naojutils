@@ -96,7 +96,7 @@ def table2sbr(table, fov_ctr_px, px_scale):
 
     Returns a buffer and a list of warnings.
     """
-    offset = np.deg2rad(mos_rot_deg)
+    # offset = np.deg2rad(mos_rot_deg)
     conversion = 0.015 / beta / 0.1038 * px_scale
     fov_x_ctr, fov_y_ctr = fov_ctr_px
 
@@ -145,7 +145,7 @@ def table2sbr(table, fov_ctr_px, px_scale):
             lines.append(f"B,{x1_laser:9.4f},{y1_laser:9.4f},{x2_laser:9.4f},{y2_laser:9.4f},{width:9.4f}")
         else:
             radius = shape['slit_width'] / 2 * 0.015 / beta / 0.1038 * px_scale
-            lines.append(f"C,{(x1_laser + x2_laser)/2:9.4f},{(y1_laser + y2_laser)/2:9.4f},{abs((x2_laser-x1_laser)/2):9.4f}")
+            lines.append(f"C,{(x1_laser + x2_laser) * 0.5:9.4f},{(y1_laser + y2_laser) * 0.5:9.4f},{abs((x2_laser - x1_laser) * 0.5):9.4f}")
 
     sbr_s = "\n".join(lines) + "\n"
     return sbr_s, warnings
