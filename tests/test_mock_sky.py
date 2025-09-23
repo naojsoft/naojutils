@@ -1,4 +1,4 @@
-"""Unit Tests for the ginga.util.mock_sky functions"""
+"""Unit Tests for the naoj.util.mock_sky functions"""
 
 import numpy as np
 

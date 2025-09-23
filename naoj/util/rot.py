@@ -354,7 +354,7 @@ def compute_rotator_angles(pang_start_deg, pang_stop_deg, pa_deg,
                                             ins_delta=ins_delta)
     rot_end, _na = calc_rotator_angle(pang_stop_deg, pa_deg, flip=flip,
                                       ins_delta=ins_delta)
-    rot_start = normalize_angle(rot_start, limit='full')
+    rot_start = normalize_angle(rot_start, limit=None)
 
     # Detect zenith crossing
     crossed_zenith = is_north_az(az_start_deg) != is_north_az(az_stop_deg)
@@ -365,7 +365,7 @@ def compute_rotator_angles(pang_start_deg, pang_stop_deg, pa_deg,
     else:
         rot_end = unwrap_angle(rot_start, rot_end)
 
-    rot_end = normalize_angle(rot_end, limit='full')
+    rot_end = normalize_angle(rot_end, limit=None)
 
     return rot_start, rot_end, off_deg
 
