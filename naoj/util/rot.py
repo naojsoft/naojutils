@@ -58,7 +58,7 @@ def normalize_angle(ang_deg, limit=None, ang_offset=0.0):
     if not is_array:
         ang_deg = np.array([ang_deg], dtype=float)
 
-    ang_deg = ang_deg + ang_offset
+    ang_deg = (ang_deg + ang_offset).astype(float)
 
     # constrain to -360, +360
     mask = np.fabs(ang_deg) >= 360.0
@@ -358,13 +358,9 @@ def compute_rotator_angles(pang_start_deg, pang_stop_deg, pa_deg,
 
     # Detect zenith crossing
     crossed_zenith = is_north_az(az_start_deg) != is_north_az(az_stop_deg)
-
-    if crossed_zenith:
-        # Apply 180° flip
-        rot_end = unwrap_angle(rot_start, rot_end + 180.0)
-    else:
-        rot_end = unwrap_angle(rot_start, rot_end)
-
+    # Apply 180 deg flip if needed
+    add_180 = np.multiply(crossed_zenith, 180.0)
+    rot_end = unwrap_angle(rot_start, rot_end + add_180)
     rot_end = normalize_angle(rot_end, limit=None)
 
     return rot_start, rot_end, off_deg
