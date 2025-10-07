@@ -56,7 +56,7 @@ a channel. An instance can be opened for each channel.
 * You can toggle visibility or mark items for deletion (unchecked items
   will be commented out when saving).
 
-**8. Auto Detection (New!)**
+**8. Auto Exclusion**
 
 * The plugin automatically detects:
 
@@ -136,7 +136,6 @@ from astropy.units.quantity import Quantity
 # ginga
 from ginga.gw import Widgets
 from ginga import GingaPlugin
-from ginga.util.paths import icondir as ginga_icon_dir
 from ginga.util import wcs
 
 # local
@@ -168,12 +167,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.dc = fv.get_draw_classes()
         canvas = self.dc.DrawingCanvas()
-        canvas.enable_draw(True)
-        canvas.enable_edit(True)
-        canvas.set_drawtype('rectangle')
-        canvas.set_draw_mode('edit')
+        canvas.enable_draw(False)
+        canvas.enable_edit(False)
+        #canvas.set_drawtype('rectangle')
+        #canvas.set_draw_mode(None)
         canvas.set_surface(self.fitsimage)
-        canvas.register_for_cursor_drawing(self.fitsimage)
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
 
@@ -298,7 +296,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         vbox_slit.add_widget(hbox_sh_display, stretch=0)
 
-        # Row 1: Show Slit List + Auto Detection
+        # Row 1: Show Slit List + Auto Exclusion
         hbox_view_auto = Widgets.HBox()
         hbox_view_auto.set_spacing(4)
 
@@ -306,7 +304,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         btn_view_params.set_tooltip("Show the slit list with enabling checkboxes")
         btn_view_params.add_callback('activated', lambda w: self.show_slit_and_hole_info())
 
-        btn_auto = Widgets.Button("Auto Detection")
+        btn_auto = Widgets.Button("Auto Exclusion")
         btn_auto.set_tooltip("Detect and exclude holes and slits outside detector area")
         btn_auto.add_callback('activated', lambda w: self.auto_detect_overlaps())
 
@@ -436,12 +434,28 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                 parent=self.fv.w.root)
         content = dialog.get_content_area()
         content.set_border_width(4)
-        combo = Widgets.ComboBox()
+        shape_w = Widgets.ComboBox()
         for label in ["Slit (Rectangle)", "Hole (Circle)"]:
-            combo.append_text(label)
+            shape_w.append_text(label)
         content.add_widget(Widgets.Label("Select shape to add:"), stretch=0)
-        content.add_widget(combo, stretch=1)
-        dialog.add_callback('activated', self.add_slit_cb, combo)
+        content.add_widget(shape_w, stretch=0)
+        content.add_widget(Widgets.Label("Comment for shape:"), stretch=0)
+        comment = Widgets.TextEntry('')
+        dialog.comment = comment
+        content.add_widget(comment, stretch=0)
+        content.add_widget(Widgets.Label("Add shape by:"), stretch=0)
+        combo = Widgets.ComboBox()
+        for label in ["X/Y Pos", "RA/DEC"]:
+            combo.append_text(label)
+        content.add_widget(combo, stretch=0)
+        content.add_widget(Widgets.Label("Click in image to set location, or manually set values"), stretch=0)
+        hbox = Widgets.HBox()
+        hbox.set_border_width(2)
+        dialog.hbox = hbox
+        content.add_widget(hbox, stretch=1)
+        self._configure_add_cb(combo, 0, dialog, hbox)
+        combo.add_callback('activated', self._configure_add_cb, dialog, hbox)
+        dialog.add_callback('activated', self.add_slit_cb, shape_w)
         self.w.add_slit_dialog = dialog
 
         # Slit and Hole Manager dialog
@@ -684,25 +698,110 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     excluded_count += 1
 
         self.update_slits_spectra()
-        self.message_box('info', "Auto Detection", f"Excluded {excluded_count} shape(s).")
+        self.message_box('info', "Auto Exclusion", f"Excluded {excluded_count} shape(s).")
 
     def add_slit_or_hole(self):
         self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
 
+        self.canvas.set_callback('button-press', self._on_click_event,
+                                 self.w.add_slit_dialog)
         self.w.add_slit_dialog.show()
 
-    def add_slit_cb(self, w, val, combo):
+    def _on_click_event(self, canvas, button, data_x, data_y, dialog):
+        self.fv.show_status("")
+
+        # convert canvas coords to FITS coords
+        x = data_x + 1
+        y = data_y + 1
+
+        if dialog.method == 0:
+            dialog.x.set_text(f"{x:.3f}")
+            dialog.y.set_text(f"{y:.3f}")
+
+        elif dialog.method == 1:
+            image = self.fitsimage.get_image()
+            if image is None:
+                return
+            # Ginga coordinate conversion is 0-based
+            ra_deg, dec_deg = image.pixtoradec(data_x, data_y)
+            ra_str = wcs.ra_deg_to_str(ra_deg)
+            dec_str = wcs.dec_deg_to_str(dec_deg)
+            # TODO: provide an option to display in degrees?
+            # dialog.ra.set_text(f"{ra_deg:.3f}")
+            # dialog.dec.set_text(f"{dec_deg:.3f}")
+            dialog.ra.set_text(ra_str)
+            dialog.dec.set_text(dec_str)
+
+        return True
+
+    def _configure_add_cb(self, w, idx, dialog, hbox):
+        hbox.remove_all()
+        dialog.method = idx
+        if idx == 0:
+            hbox.add_widget(Widgets.Label("X:"), stretch=0)
+            dialog.x = Widgets.TextEntry("")
+            hbox.add_widget(dialog.x, stretch=1)
+            hbox.add_widget(Widgets.Label("Y:"), stretch=0)
+            dialog.y = Widgets.TextEntry("")
+            hbox.add_widget(dialog.y, stretch=1)
+        elif idx == 1:
+            hbox.add_widget(Widgets.Label("RA:"), stretch=0)
+            dialog.ra = Widgets.TextEntry("")
+            hbox.add_widget(dialog.ra, stretch=1)
+            hbox.add_widget(Widgets.Label("DEC:"), stretch=0)
+            dialog.dec = Widgets.TextEntry("")
+            hbox.add_widget(dialog.dec, stretch=1)
+        return True
+
+    def add_slit_cb(self, w, val, shape_w):
         w.hide()
+        self.canvas.remove_callback('button-press', self._on_click_event)
         if val == 1:
             # cancel
             return
-        self.logger.info("adding slit")
-        choice = combo.get_text()
-        self._add_shape_type = 'slit' if choice.startswith("Slit") else 'hole'
-        self.canvas.set_drawtype('point')
-        self.canvas.set_draw_mode('draw')
-        self.canvas.set_callback('button-press', self._on_click_event)
-        self.canvas.ui_set_active(True, viewer=self.fitsimage)
+        choice = shape_w.get_text()
+        shape_type = 'slit' if choice.startswith("Slit") else 'hole'
+        self._add_shape_type = shape_type
+        self.logger.info(f"adding {shape_type}")
+        comment = w.comment.get_text().strip()
+
+        method = w.method
+
+        if method == 0:
+            try:
+                x = float(w.x.get_text().strip())
+                y = float(w.y.get_text().strip())
+            except ValueError:
+                self.message_box('error', "Error", "Please enter numerical values for X and Y.")
+                return
+
+            self.add_shape(x, y, shape_type, comment=comment)
+
+        elif method == 1:
+            try:
+                ra_str = w.ra.get_text().strip()
+                dec_str = w.dec.get_text().strip()
+                if ':' in ra_str:
+                    ra_deg = wcs.hmsStrToDeg(ra_str)
+                    dec_deg = wcs.dmsStrToDeg(dec_str)
+                else:
+                    ra_deg, dec_deg = float(ra_str), float(dec_str)
+            except Exception:
+                self.message_box('error', "Error", "Please enter values in degrees for RA and DEC.")
+                return
+            image = self.fitsimage.get_image()
+            if image is None:
+                self.message_box('error', "Error", "There needs to be an image loaded with WCS to set the object position in RA/DEC")
+                return
+            try:
+                x, y = image.radectopix(ra_deg, dec_deg)
+                # Ginga WCS conversions are 0-based
+                x, y = x + 1, y + 1
+            except Exception:
+                self.message_box('error', "Error", "Failed to convert RA/DEC to X/Y")
+                return
+
+            self.add_shape(x, y, shape_type, comment=comment)
 
     def is_within_fov_bounds(self, x, y):
         """Check if (x, y) is within MOIRCS rectangle in x, and
@@ -724,15 +823,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         min_pixel_dist = min_arcsec_from_center / 3600.0 / self.pixel_scale
         return np.fabs(y - y_center) >= min_pixel_dist
 
-    def _on_click_event(self, canvas, button, data_x, data_y):
-        self.canvas.set_draw_mode(None)
-        self.canvas.remove_callback('button-press', self._on_click_event)
-        self.canvas.ui_set_active(False, viewer=self.fitsimage)
-
-        # convert canvas coords to FITS coords
-        x = data_x + 1
-        y = data_y + 1
-
+    def add_shape(self, x, y, shape_type, comment=''):
+        # NOTE:
         out_of_bounds = (not self.is_within_fov_bounds(x, y) or
                          not self.is_within_y_arcsec_limit(y))
         if out_of_bounds:
@@ -743,19 +835,24 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                 parent=self.fv.w.root)
         layout = dialog.get_content_area()
         layout.set_border_width(4)
-        layout.add_widget(Widgets.Label(f"Add new {self._add_shape_type} at x={x:.1f}, y={y:.1f}?"), stretch=0)
+        layout.add_widget(Widgets.Label(f"Add new {shape_type} at x={x:.2f}, y={y:.2f}?"), stretch=0)
         comment_field = Widgets.TextEntry()
+        comment_field.set_text(comment)
         layout.add_widget(Widgets.Label("Comment:"), stretch=0)
         layout.add_widget(comment_field, stretch=0)
 
         def on_confirm(w, val):
             w.hide()
+            w.delete()
+            if val == 1:
+                # cancelled
+                return
             comment = comment_field.get_text()
             shape = {'x': x, 'y': y, 'comment': comment}
             if out_of_bounds:
                 # Initially excluded from auto detection/export
                 shape['_excluded'] = True
-            if self._add_shape_type == 'slit':
+            if shape_type == 'slit':
                 shape.update({'type': 'B', 'width': 100,
                               'length': 7, 'angle': 0, 'priority': '1'})
             else:
@@ -1256,22 +1353,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.write_sbr_file(path)
 
     def message_box(self, category, title, message, parent=None):
-        warn = Widgets.Dialog(title=title, modal=False,
-                              parent=self.fv.w.root,
-                              buttons=[("Dismiss", 0)])
-        vbox = warn.get_content_area()
-        vbox.set_margins(4, 4, 4, 4)
-        hbox = Widgets.HBox()
-        hbox.set_border_width(4)
-        hbox.add_widget(Widgets.Label(""), stretch=1)
-        img = Widgets.Image()
-        # TODO: critical, warning, info -- different icons
-        iconfile = os.path.join(ginga_icon_dir, "warning.svg")
-        img.load_file(iconfile)
-        hbox.add_widget(img, stretch=0)
-        hbox.add_widget(Widgets.Label(""), stretch=1)
-        vbox.add_widget(hbox, stretch=1)
-        vbox.add_widget(Widgets.Label(message))
+        warn = Widgets.MessageDialog(title=title, modal=False,
+                                     parent=self.fv.w.root,
+                                     buttons=[("Dismiss", 0)])
+        warn.set_message(category, message, title=title)
         warn.add_callback('activated', lambda w, val: w.hide())
         warn.add_callback('close', lambda w: w.hide())
         self.w.warning = warn
@@ -1294,13 +1379,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if self.canvas not in p_canvas:
             p_canvas.add(self.canvas, tag='maskbuilder-canvas')
 
+        self.resume()
         self.redo()
 
     def stop(self):
         self.gui_up = False
+        self.pause()
         p_canvas = self.fitsimage.get_canvas()
         if self.canvas in p_canvas:
             p_canvas.delete_object(self.canvas)
+
+    def pause(self):
+        self.canvas.ui_set_active(False, viewer=self.fitsimage)
+
+    def resume(self):
+        self.canvas.ui_set_active(True, viewer=self.fitsimage)
 
     def redo(self):
         # <-- FITS image is loaded
