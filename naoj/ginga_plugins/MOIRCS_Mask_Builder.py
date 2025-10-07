@@ -136,7 +136,7 @@ from astropy.units.quantity import Quantity
 # ginga
 from ginga.gw import Widgets
 from ginga import GingaPlugin
-from ginga.util import wcs
+from ginga.util import wcs, iqcalc
 
 # local
 from naoj.moircs.grism_info import grism_info_map
@@ -164,13 +164,17 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self._undo_stack = []
         self._updating_grism_params = False
         self.show_excluded = False
+        self.iqcalc = iqcalc.IQCalc(logger=self.logger)
 
         self.dc = fv.get_draw_classes()
         canvas = self.dc.DrawingCanvas()
         canvas.enable_draw(False)
         canvas.enable_edit(False)
-        #canvas.set_drawtype('rectangle')
-        #canvas.set_draw_mode(None)
+        canvas.set_drawtype('box', color='cyan', linestyle='dash')
+        canvas.set_callback('draw-event', self.draw_cb)
+        canvas.add_draw_mode('click', down=self.btn_down)
+        canvas.register_for_cursor_drawing(self.fitsimage)
+        canvas.set_draw_mode(None)
         canvas.set_surface(self.fitsimage)
         canvas.name = 'maskbuilder-canvas'
         self.canvas = canvas
@@ -443,18 +447,31 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         comment = Widgets.TextEntry('')
         dialog.comment = comment
         content.add_widget(comment, stretch=0)
-        content.add_widget(Widgets.Label("Add shape by:"), stretch=0)
-        combo = Widgets.ComboBox()
-        for label in ["X/Y Pos", "RA/DEC"]:
-            combo.append_text(label)
-        content.add_widget(combo, stretch=0)
-        content.add_widget(Widgets.Label("Click in image to set location, or manually set values"), stretch=0)
         hbox = Widgets.HBox()
         hbox.set_border_width(2)
-        dialog.hbox = hbox
-        content.add_widget(hbox, stretch=1)
-        self._configure_add_cb(combo, 0, dialog, hbox)
-        combo.add_callback('activated', self._configure_add_cb, dialog, hbox)
+        hbox.add_widget(Widgets.Label("X:"), stretch=0)
+        dialog.x = Widgets.TextEntry("")
+        hbox.add_widget(dialog.x, stretch=1)
+        hbox.add_widget(Widgets.Label("Y:"), stretch=0)
+        dialog.y = Widgets.TextEntry("")
+        hbox.add_widget(dialog.y, stretch=1)
+        btn = Widgets.Button("Set")
+        btn.add_callback('activated', self._configure_adjust_xy_cb, dialog)
+        hbox.add_widget(btn, stretch=0)
+        content.add_widget(hbox, stretch=0)
+        hbox = Widgets.HBox()
+        hbox.set_border_width(2)
+        hbox.add_widget(Widgets.Label("RA:"), stretch=0)
+        dialog.ra = Widgets.TextEntry("")
+        hbox.add_widget(dialog.ra, stretch=1)
+        hbox.add_widget(Widgets.Label("DEC:"), stretch=0)
+        dialog.dec = Widgets.TextEntry("")
+        hbox.add_widget(dialog.dec, stretch=1)
+        btn = Widgets.Button("Set")
+        btn.add_callback('activated', self._configure_adjust_radec_cb, dialog)
+        hbox.add_widget(btn, stretch=0)
+        content.add_widget(hbox, stretch=0)
+        content.add_widget(Widgets.Label("Click in image to set location, right-drag around an object or manually set values"), stretch=0)
         dialog.add_callback('activated', self.add_slit_cb, shape_w)
         self.w.add_slit_dialog = dialog
 
@@ -517,7 +534,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.w.save_mdp.add_ext_filter(".mdp files", '.mdp')
         self.w.save_mdp.add_callback('activated', self.save_mdp_file_cb)
         btn_save_mdp.add_callback('activated', lambda w: self.w.save_mdp.popup())
-
 
         btn_save_sbr = Widgets.Button("Save SBR")
         btn_save_sbr.set_tooltip("Save SBR file")
@@ -588,7 +604,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             width, height = image.get_size()
             x, y = int(width * 0.5), int(height * 0.5)
             # NOTE: account for FITS indexing vs. canvas indexing
-            self.set_fov_center(x_center + 1, y_center + 1)
+            self.set_fov_center(x + 1, y + 1)
 
     def update_fov(self):
         self.draw_fov()
@@ -703,59 +719,119 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def add_slit_or_hole(self):
         self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
 
-        self.canvas.set_callback('button-press', self._on_click_event,
-                                 self.w.add_slit_dialog)
+        dialog = self.w.add_slit_dialog
+        dialog.x.set_text('')
+        dialog.y.set_text('')
+        dialog.ra.set_text('')
+        dialog.dec.set_text('')
+        dialog.comment.set_text('')
+
+        self.canvas.enable_draw(True)
+        self.canvas.set_draw_mode('click')
         self.w.add_slit_dialog.show()
 
-    def _on_click_event(self, canvas, button, data_x, data_y, dialog):
-        self.fv.show_status("")
+    def btn_down(self, canvas, event, data_x, data_y, viewer):
+        self._set_xy(data_x, data_y)
+        return True
 
+    def _set_xy(self, data_x, data_y):
+        dialog = self.w.add_slit_dialog
         # convert canvas coords to FITS coords
         x = data_x + 1
         y = data_y + 1
 
-        if dialog.method == 0:
-            dialog.x.set_text(f"{x:.3f}")
-            dialog.y.set_text(f"{y:.3f}")
+        dialog.x.set_text(f"{x:.3f}")
+        dialog.y.set_text(f"{y:.3f}")
 
-        elif dialog.method == 1:
-            image = self.fitsimage.get_image()
-            if image is None:
+        image = self.fitsimage.get_image()
+        if image is None:
+            dialog.ra.set_text("")
+            dialog.dec.set_text("")
+            return
+
+        # Ginga coordinate conversion is 0-based
+        ra_deg, dec_deg = image.pixtoradec(data_x, data_y)
+        ra_str = wcs.ra_deg_to_str(ra_deg)
+        dec_str = wcs.dec_deg_to_str(dec_deg)
+        # TODO: provide an option to display in degrees?
+        # dialog.ra.set_text(f"{ra_deg:.3f}")
+        # dialog.dec.set_text(f"{dec_deg:.3f}")
+        dialog.ra.set_text(ra_str)
+        dialog.dec.set_text(dec_str)
+
+        self._mark_xy(data_x, data_y)
+
+    def _mark_xy(self, data_x, data_y):
+        # mark the spot where the item will go
+        self.canvas.delete_object_by_tag("premark")
+        mark = self.dc.Point(data_x, data_y, radius=20, color='springgreen',
+                             style='plus', linewidth=2)
+        self.canvas.add(mark, tag="premark")
+
+    def draw_cb(self, canvas, tag):
+        obj = canvas.get_object_by_tag(tag)
+        canvas.delete_object_by_tag(tag)
+
+        if obj.kind != 'box':
+            return True
+
+        image = self.fitsimage.get_image()
+        if image is None:
+            self.fv.show_error("No image loaded")
+            return
+
+        x1, y1 = obj.x - obj.xradius, obj.y - obj.yradius
+        x2, y2 = obj.x + obj.xradius, obj.y + obj.yradius
+
+        self.logger.debug("cut box %d,%d %d,%d" % (x1, y1, x2, y2))
+        try:
+            iqres = self.iqcalc.qualsize(image, x1=x1, y1=y1, x2=x2, y2=y2)
+        except Exception as e:
+            self.fv.show_error(f"failed to find center of object: {e}")
+            return
+
+        self._set_xy(iqres.objx, iqres.objy)
+        return True
+
+    def _configure_adjust_xy_cb(self, w, dialog):
+        x_str = dialog.x.get_text().strip()
+        y_str = dialog.y.get_text().strip()
+        try:
+            data_x, data_y = float(x_str), float(y_str)
+        except ValueError:
+            self.message_box('error', "Error", "Bad value for X or Y")
+            return
+
+        self._set_xy(data_x, data_y)
+
+    def _configure_adjust_radec_cb(self, w, dialog):
+        ra_str = dialog.ra.get_text().strip()
+        dec_str = dialog.dec.get_text().strip()
+
+        image = self.fitsimage.get_image()
+        if image is None:
+            self.message_box('error', "Error", "There needs to be an image loaded with WCS to set the object position in RA/DEC")
+            return
+
+        if ':' in ra_str:
+            try:
+                ra_deg = wcs.hmsStrToDeg(ra_str)
+                dec_deg = wcs.dmsStrToDeg(dec_str)
+            except Exception:
+                self.message_box('error', "Error", "Please enter values in degrees or sexigesimal form for RA and DEC.")
                 return
-            # Ginga coordinate conversion is 0-based
-            ra_deg, dec_deg = image.pixtoradec(data_x, data_y)
-            ra_str = wcs.ra_deg_to_str(ra_deg)
-            dec_str = wcs.dec_deg_to_str(dec_deg)
-            # TODO: provide an option to display in degrees?
-            # dialog.ra.set_text(f"{ra_deg:.3f}")
-            # dialog.dec.set_text(f"{dec_deg:.3f}")
-            dialog.ra.set_text(ra_str)
-            dialog.dec.set_text(dec_str)
+        else:
+            ra_deg, dec_deg = float(ra_str), float(dec_str)
 
-        return True
+        data_x, data_y = image.radectopix(ra_deg, dec_deg)
 
-    def _configure_add_cb(self, w, idx, dialog, hbox):
-        hbox.remove_all()
-        dialog.method = idx
-        if idx == 0:
-            hbox.add_widget(Widgets.Label("X:"), stretch=0)
-            dialog.x = Widgets.TextEntry("")
-            hbox.add_widget(dialog.x, stretch=1)
-            hbox.add_widget(Widgets.Label("Y:"), stretch=0)
-            dialog.y = Widgets.TextEntry("")
-            hbox.add_widget(dialog.y, stretch=1)
-        elif idx == 1:
-            hbox.add_widget(Widgets.Label("RA:"), stretch=0)
-            dialog.ra = Widgets.TextEntry("")
-            hbox.add_widget(dialog.ra, stretch=1)
-            hbox.add_widget(Widgets.Label("DEC:"), stretch=0)
-            dialog.dec = Widgets.TextEntry("")
-            hbox.add_widget(dialog.dec, stretch=1)
-        return True
+        self._set_xy(data_x, data_y)
 
     def add_slit_cb(self, w, val, shape_w):
         w.hide()
-        self.canvas.remove_callback('button-press', self._on_click_event)
+        self.canvas.delete_object_by_tag("premark")
+        self.canvas.enable_draw(False)
+        self.canvas.set_draw_mode(None)
         if val == 1:
             # cancel
             return
@@ -765,43 +841,14 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.logger.info(f"adding {shape_type}")
         comment = w.comment.get_text().strip()
 
-        method = w.method
+        try:
+            x = float(w.x.get_text().strip())
+            y = float(w.y.get_text().strip())
+        except ValueError:
+            self.message_box('error', "Error", "Please enter numerical values for X and Y.")
+            return
 
-        if method == 0:
-            try:
-                x = float(w.x.get_text().strip())
-                y = float(w.y.get_text().strip())
-            except ValueError:
-                self.message_box('error', "Error", "Please enter numerical values for X and Y.")
-                return
-
-            self.add_shape(x, y, shape_type, comment=comment)
-
-        elif method == 1:
-            try:
-                ra_str = w.ra.get_text().strip()
-                dec_str = w.dec.get_text().strip()
-                if ':' in ra_str:
-                    ra_deg = wcs.hmsStrToDeg(ra_str)
-                    dec_deg = wcs.dmsStrToDeg(dec_str)
-                else:
-                    ra_deg, dec_deg = float(ra_str), float(dec_str)
-            except Exception:
-                self.message_box('error', "Error", "Please enter values in degrees for RA and DEC.")
-                return
-            image = self.fitsimage.get_image()
-            if image is None:
-                self.message_box('error', "Error", "There needs to be an image loaded with WCS to set the object position in RA/DEC")
-                return
-            try:
-                x, y = image.radectopix(ra_deg, dec_deg)
-                # Ginga WCS conversions are 0-based
-                x, y = x + 1, y + 1
-            except Exception:
-                self.message_box('error', "Error", "Failed to convert RA/DEC to X/Y")
-                return
-
-            self.add_shape(x, y, shape_type, comment=comment)
+        self.add_shape(x, y, shape_type, comment=comment)
 
     def is_within_fov_bounds(self, x, y):
         """Check if (x, y) is within MOIRCS rectangle in x, and
@@ -830,39 +877,17 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if out_of_bounds:
             self.message_box('warning', "Out of Bounds", "The selected position is outside the allowed FOV, but it will be added.")
 
-        dialog = Widgets.Dialog(title="Confirm New Shape",
-                                buttons=[("Confirm", 0), ("Cancel", 1)],
-                                parent=self.fv.w.root)
-        layout = dialog.get_content_area()
-        layout.set_border_width(4)
-        layout.add_widget(Widgets.Label(f"Add new {shape_type} at x={x:.2f}, y={y:.2f}?"), stretch=0)
-        comment_field = Widgets.TextEntry()
-        comment_field.set_text(comment)
-        layout.add_widget(Widgets.Label("Comment:"), stretch=0)
-        layout.add_widget(comment_field, stretch=0)
-
-        def on_confirm(w, val):
-            w.hide()
-            w.delete()
-            if val == 1:
-                # cancelled
-                return
-            comment = comment_field.get_text()
-            shape = {'x': x, 'y': y, 'comment': comment}
-            if out_of_bounds:
-                # Initially excluded from auto detection/export
-                shape['_excluded'] = True
-            if shape_type == 'slit':
-                shape.update({'type': 'B', 'width': 100,
-                              'length': 7, 'angle': 0, 'priority': '1'})
-            else:
-                shape.update({'type': 'C', 'diameter': 30})
-            self.shapes.append(shape)
-            self.update_slits_spectra()
-
-        dialog.add_callback('activated', on_confirm)
-        self.w.confirm_click_dialog = dialog
-        dialog.show()
+        shape = {'x': x, 'y': y, 'comment': comment}
+        if out_of_bounds:
+            # Initially excluded from auto detection/export
+            shape['_excluded'] = True
+        if shape_type == 'slit':
+            shape.update({'type': 'B', 'width': 100,
+                          'length': 7, 'angle': 0, 'priority': '1'})
+        else:
+            shape.update({'type': 'C', 'diameter': 30})
+        self.shapes.append(shape)
+        self.update_slits_spectra()
 
     def edit_slit_or_hole(self):
         dialog = Widgets.Dialog(title="Edit Slit or Hole",
@@ -1016,7 +1041,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # Apply 4 arcsecond leftward (-x) offset
         # Ichi-san says this might only need to happen at the MDP=>SBR time
-        #xc -= 4.0 / 3600.0 / self.pixel_scale
+        # xc -= 4.0 / 3600.0 / self.pixel_scale
 
         radius_6 = (6.0 * 60) / self.pixel_scale * 0.5
         radius_8 = (8.0 * 60) / self.pixel_scale * 0.5
@@ -1403,12 +1428,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         image = self.fitsimage.get_image()
         if image is None:
             self.pixel_scale = self.settings['default_pixscale_arcsec']
-            width, height = int(2 * default_x_ctr), int(2 * default_y_ctr)
             self.fits_filename = 'UNKNOWN_IMAGE'
 
             self.image_pa_deg = 0.0
         else:
-            #self.set_fov_center_from_image(image)
+            # self.set_fov_center_from_image(image)
             path = image.get('path', 'UNKNOWN_IMAGE')
             self.fits_filename = os.path.basename(path)
 
@@ -1420,7 +1444,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 self.logger.debug(f"cdelt1={cdelt1:.8f}, cdelt2={cdelt2:.8f}")
                 # convert to arcsec/px
                 self.pixel_scale = np.max([np.fabs(cdelt1),
-                                        np.fabs(cdelt2)]) * 3600.0
+                                           np.fabs(cdelt2)]) * 3600.0
 
                 self.image_pa_deg = xrot_deg
 
