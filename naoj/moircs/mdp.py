@@ -8,35 +8,35 @@ beta = 0.29898169
 sbr_fudge = 1.006
 
 
-def file2table(path):
-    """Read an MDP file into an Astropy table"""
+def load_ecsv(path):
+    """Read an ECSV file into rows that can be used by the
+    MOIRCS_Mask_Builder plugin.
+    """
+    tbl = Table.read(path, format='ascii.ecsv', delimiter=',',
+                     comment=r'\s*#', quotechar='"',
+                     header_start=0)
+    rows = []
+    for row in tbl:
+        row_dict = dict(row)
+        if row_dict['type'] == 'hole':
+            row_dict['diameter'] = row_dict.pop('slit_width')
+            row_dict.pop('slit_length')
+            row_dict.pop('angle')
+        else:
+            row_dict['width'] = row_dict.pop('slit_width')
+            row_dict['length'] = row_dict.pop('slit_length')
 
-    # read mdp file
-    with open(path, 'r') as mdp_f:
-        buf = mdp_f.read()
-        lines = buf.split('\n')
-        lines.pop(-1)
+        #row_dict['_excluded'] = row_dict.pop('excluded')
 
-    # separate into arrays of the appropriate type
-    tups = [line.split() for line in lines]
-    x = np.array([float(tup[0]) for tup in tups])
-    y = np.array([float(tup[1]) for tup in tups])
-    length = np.array([float(tup[2]) for tup in tups])
-    width = np.array([float(tup[3]) for tup in tups])
-    ang = np.array([float(tup[4]) for tup in tups])
-    priority = np.array([float(tup[5]) for tup in tups])
-    otype = np.array([tup[6] for tup in tups])
-    comment = np.array([' '.join(tup[7:]) for tup in tups])
+        rows.append(row_dict)
 
-    # make a proper table with headers and columns
-    tbl = Table([x, y, length, width, ang, priority, otype, comment],
-            names=['x', 'y', 'slit_length', 'slit_width',
-                   'angle', 'priority', 'type', 'comment'])
-
-    return tbl
+    return rows, tbl
 
 
 def load_mdp(path):
+    """Read an MDP file into rows that can be used by the
+    MOIRCS_Mask_Builder plugin.
+    """
     rows = []
     with open(path, 'r') as f:
         for line in f:
@@ -46,23 +46,53 @@ def load_mdp(path):
             parts = line.split()
             if len(parts) < 7:
                 continue
+            otype = parts[6].strip()
             row_dict = {
-                'type': parts[6].strip(),
+                'type': 'hole' if otype.startswith('C') else 'slit',
                 'x': float(parts[0]),
                 'y': float(parts[1]),
                 'width': float(parts[2]),
                 'length': float(parts[3]),
                 'angle': float(parts[4]),
                 'priority': parts[5],
+                'excluded': False,
                 'comment': " ".join(parts[7:]) if len(parts) > 7 else ''
             }
-            if row_dict['type'].startswith('C'):
+            if row_dict['type'] == 'hole':
                 row_dict['diameter'] = row_dict.pop('width')
                 row_dict.pop('length')
                 row_dict.pop('angle')
             rows.append(row_dict)
 
     return rows
+
+
+def mdp2buf(rows):
+    """Save shapes from the MOIRCS_Mask_Builder plugin omtpa MDP file into rows that can be used by the
+    .
+    """
+    lines = []
+    for shape in rows:
+        x = shape['x']
+        y = shape['y']
+        comment = shape.get('comment', '')
+        if shape['type'] == 'slit':
+            w = shape['width']
+            l = shape['length']
+            a = shape['angle']
+            line = f"{x:.2f} {y:.2f} {w:.0f} {l:.0f} {a:.0f} 1 B, {comment}\n"
+        else:
+            d = shape['diameter']
+            line = f"{x:.2f} {y:.2f} {d:.0f} {d:.0f} 0 0 C, {comment}\n"
+
+        #if shape.get('_deleted') or shape.get('excluded'):
+        if shape.get('excluded'):
+            lines.append(f"# {line}")
+        else:
+            lines.append(line)
+
+    mdp_s = "\n".join(lines) + "\n"
+    return mdp_s
 
 
 def rows2table(rows):
@@ -80,14 +110,39 @@ def rows2table(rows):
     ang = np.array([float(dct.get('angle', 0.0)) for dct in rows])
     priority = np.array([float(dct['priority']) for dct in rows])
     otype = np.array([dct['type'] for dct in rows])
+    excluded = np.array([dct.get('excluded', False) for dct in rows])
     comment = np.array([dct['comment'] for dct in rows])
 
     # make a proper table with headers and columns
-    tbl = Table([x, y, length, width, ang, priority, otype, comment],
+    tbl = Table([x, y, length, width, ang, priority, otype, excluded, comment],
             names=['x', 'y', 'slit_length', 'slit_width',
-                   'angle', 'priority', 'type', 'comment'])
+                   'angle', 'priority', 'type', 'excluded', 'comment'])
 
     return tbl
+
+
+def table2mdp(table):
+    lines = []
+    for row in table:
+        x = row['x']
+        y = row['y']
+        comment = row.get('comment', '')
+        if row['type'] == 'slit':
+            w = row['slit_width']
+            l = row['slit_length']
+            a = row['angle']
+            line = f"{x:.2f} {y:.2f} {w:.0f} {l:.0f} {a:.0f} 1 B, {comment}\n"
+        else:
+            d = row['slit_width']
+            line = f"{x:.2f} {y:.2f} {d:.0f} {d:.0f} 0 0 C, {comment}\n"
+
+        if row['excluded']:
+            lines.append(f"# {line}")
+        else:
+            lines.append(line)
+
+    mdp_s = "\n".join(lines) + "\n"
+    return mdp_s
 
 
 def table2sbr(table, fov_ctr_px, px_scale):
@@ -135,12 +190,12 @@ def table2sbr(table, fov_ctr_px, px_scale):
                               np.hypot(x2_focus, y1_focus),
                               np.hypot(x2_focus, y2_focus)])
         if np.any(corners_r > 90):
-            warnings.append(f"{'Slit' if shape['type'].startswith('B') else 'Hole'} {i} is out of laser FOV.")
+            warnings.append(f"{'Slit' if shape['type'] == 'slit' else 'Hole'} {i} is out of laser FOV.")
 
-        if shape['type'].startswith('B') and np.any(np.abs([x1_focus, x2_focus]) > 60):
+        if shape['type'] == 'slit' and np.any(np.abs([x1_focus, x2_focus]) > 60):
             warnings.append(f"Slit {i} is out of MOIRCS FOV.")
 
-        if shape['type'].startswith('B'):
+        if shape['type'] == 'slit':
             width = (shape['slit_length'] * px_scale / 2.06218 * sbr_fudge) * 1.08826 - 0.126902
             lines.append(f"B,{x1_laser:9.4f},{y1_laser:9.4f},{x2_laser:9.4f},{y2_laser:9.4f},{width:9.4f}")
         else:
@@ -203,7 +258,7 @@ def table2sbr2(table, fov_ctr_px, px_scale):
 
     lines = ["B,{0: 9.4f},{1: 9.4f},{2: 9.4f},{3: 9.4f},{4: 9.4f}".format(
         x1_laser[i], y1_laser[i], x2_laser[i], y2_laser[i], w_laser[i])
-             if table['type'][i].startswith('B') else
+             if table['type'][i] == 'slit' else
              "C,{0: 9.4f},{1: 9.4f},{2: 9.4f}".format((x1_laser[i] + x2_laser[i]) * 0.5,
                                                       (y1_laser[i] + y2_laser[i]) * 0.5,
                                                       np.abs((x2_laser[i] - x1_laser[i]) * 0.5))

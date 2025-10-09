@@ -13,50 +13,50 @@ a channel. An instance can be opened for each channel.
 
 **Usage**
 
-**1. Load a FITS Image**
+1. Load a FITS Image
 
 * Navigate to `File > Load Image`.
 * Select and open the desired FITS file in the viewer.
 
-**2. Launch the Plugin**
+2. Launch the Plugin
 
 * Go to `Plugins > Subaru > Planning > MOIRCS Mask Builder` to activate
-  the plugin panel for the current channel.
+  the plugin panel for the channel where you loaded the FITS file.
 
-**3. Load an MDP File**
+3. Load an MDP or ECSV File
 
-* Click the **Browse** button in the plugin.
-* Select an existing `.mdp` file containing mask information.
-* Click **Load** to populate the slit/hole list and overlay elements on
+* Click the "File" menu at the top of the plugin and select "Load".
+  A file browser dialog will be shown.
+* Select an existing `.mdp` or `.ecsv` file containing mask information
+  and Click "Open" to populate the slit/hole list and overlay elements on
   the image.
 
-**4. Toggle Detector Channels (New!)**
+4. Toggle Detector Channels
 
 * Both channels (Ch1 and Ch2) are shown by default.
 * To view channels separately, uncheck the desired channel checkboxes to
   hide them.
 
-**5. Set the Field of View (FOV) Center**
+5. Set the Field of View (FOV) Center
 
 * Enter the desired center coordinates (X, Y) in the input boxes.
-* Press **Update** to reposition the field overlay accordingly.
+* Click "Update" to reposition the field overlay accordingly.
 
-**6. Display Options**
+6. Display Options
 
 * Toggle the following options as needed:
 
-  * **Slit/Hole ID** -- Show object IDs in the upper-right corner of each shape.
-  * **Comments** -- Display user-entered comments near slits or holes.
-  * **Excluded** -- Highlight excluded slits/holes in purple.
+  * Slit/Hole ID -- Show object IDs in the upper-right corner of each shape.
+  * Comments -- Display user-entered comments near slits or holes.
+  * Excluded -- Highlight excluded slits/holes in purple.
 
-**7. View or Manage Slits and Holes**
+7. View or Manage Slits and Holes
 
-* Click **Show Slit List** to open the full list of defined slits and holes.
+* Click "Show Slit List" to open the full list of defined slits and holes.
 * Items are displayed in ID order.
-* You can toggle visibility or mark items for deletion (unchecked items
-  will be commented out when saving).
+* You can exclude or delete holes and slits.
 
-**8. Auto Exclusion**
+8. Auto Exclusion
 
 * The plugin automatically detects:
 
@@ -66,68 +66,73 @@ a channel. An instance can be opened for each channel.
     * Outside circular field boundary
     * Outside central channel gap
     * More than +/- 3 arcsec from the centerline
-* Lower-priority items will be auto-marked as **excluded**.
-* Enable **Excluded** toggle to view these items in purple on the canvas.
 
-**9. Add Slits or Holes**
+* Lower-priority items will be auto-marked as excluded.
+* Enable the "Excluded" check box to view these items in purple on the canvas.
 
-* Click **Add**, then choose between **Slit** or **Hole** mode.
-* Click on the canvas to place the center of the object.
-* Enter an optional comment in the prompt dialog.
+9. Add Slits or Holes
+
+* Click "Add", then choose between "Slit" or "Hole" object.
+* Enter an optional comment in the dialog.
+* 3 ways to set the location:
+
+  * Click on the canvas to place the center of the object,
+  * Using right mouse button, drag from the center of the object outward to
+    enclose it.  Then it will use FWHM calculation to detect the center,
+  * Manually enter the X/Y values or the RA/DEC values
+
+* Click OK to place the object.
 * A warning will appear if placed out of bounds (user may proceed regardless).
 
-**10. Edit Existing Objects**
+10. Edit Existing Objects
 
-* Click **Edit**.
+* Click "Edit".
 * Select an existing slit or hole from the dropdown list.
 * Modify dimensions, orientation, or ID.
-* Click **Apply** to update the object.
+* Click "Apply" to update the object.
 
-**11. Delete Slits or Holes**
+11. Undo Support
 
-* Open **Show Slit List**.
-* Uncheck any item to exclude it from future saves (these will be commented
-  out in the `.mdp` file).
-
-**12. Undo Support (New!)**
-
-* Basic undo functionality is now available for recent **Add** and **Edit**
-  actions.
+* Basic undo functionality is now available for recent "Add", "Edit"
+  and "Delete" actions.
 * Revert your last action with one click.
 
-**13. Toggle Spectral Footprint (New!)**
+12. Toggle Spectral Footprint
 
-* Use the **Spectra** checkbox to enable or disable overlaid spectra for
+* Use the "Spectra" check box to enable or disable overlaid spectra for
   slits, improving visibility for mask layout.
 
-**14. Tick Mark selection**
+13. Tick Mark selection
 
-* Default is **none**.
-* Select a different Tick from the **Tick Marks** dropdown menu.
+* Default is none.
+* Select a different Tick from the "Tick Marks" dropdown menu (units are in
+  angstroms).
 
-**15. Grism Selection and Parameters**
+14. Grism Selection and Parameters
 
-* Default grism is **Zj500**.
-* Select a different grism from the **Grism** dropdown menu.
+* The default grism is "zj500".
+* Select a different grism from the "Grism" dropdown menu.
 * To adjust grism parameters (e.g., tilt, dispersion), enter numeric values
-  in the corresponding fields and press **Update**.
+  in the corresponding fields and press "Update".
 
-**16. Save to .mdp**
+15. Save to .mdp, .ecsv or .sbr
 
-* Click **Save MDP**.
-* Enter the desired filename and confirm to save the current layout.
+* From the "File" menu at the top of the plugin, chose "Save as" and the
+  type of file you want to save.  A file selection dialog will pop up.
+* Select or enter the desired filename and confirm to save the current design.
+* If the type is an .sbr file, a pop-up dialog will ask you to confirm the
+  FOV center (auto-filled from current settings) before saving the file.
 
-**17. Save to .sbr**
-
-* Click **Save SBR**.
-* Confirm filename and FOV center (auto-filled from current settings).
-* Header info includes the original `.mdp` file name and current center
-  coordinates.
+.. note:: Saving in .ecsv format is preferred, because it can save metadata
+          about the loaded file, cut levels, FOV center, grism, customized
+          grism parameters, etc.  MDP is supported for compatibility with
+          the old IDL program.
 
 """
 # stdlib
 import os.path
 import copy
+from datetime import datetime
 
 # 3rd party
 import numpy as np
@@ -157,14 +162,18 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.settings.load(onError='silent')
 
         self.grismtypes = list(grism_info_map.keys())
-        default_grism = self.settings.get('grism', 'zJ500')
-        self.grism_info = self.get_grism_info(default_grism)
+        self.grism_name = self.settings.get('grism', 'zJ500')
+        self.grism_info = self.get_grism_info(self.grism_name)
 
         self.shapes = []  # Unified list for slits and holes
         self._undo_stack = []
         self._updating_grism_params = False
         self.show_excluded = False
         self.iqcalc = iqcalc.IQCalc(logger=self.logger)
+        self._save_fext = ''
+        self.param_fields = ["directwave", "wavestart", "waveend",
+                             "dispersion1", "dispersion2",
+                             "dx1", "dx2", "tilt1", "tilt2"]
 
         self.dc = fv.get_draw_classes()
         canvas = self.dc.DrawingCanvas()
@@ -188,7 +197,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.image_pa_deg = 0.0
         # our delta PA
         self.pa_deg = 0.0
-        self.mdp_filename = 'UNKNOWN_MDP'
+        self.load_filename = 'UNKNOWN_FILE'
         self.fits_filename = 'UNKNOWN_IMAGE'
         # unit of angstroms
         self.valid_intervals = ['None', '100', '250', '500', '1000']
@@ -204,9 +213,52 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         vbox.set_border_width(4)
         vbox.set_spacing(2)
 
+        # The top toolbar
+        self.w.toolbar = Widgets.Toolbar(orientation='horizontal')
+        filemenu = self.w.toolbar.add_menu("File...", mtype='menu')
+
+        w = filemenu.add_name("Load")
+        w.set_tooltip("Load an MDP or ECSV file")
+        w.add_callback('activated', lambda w: self.w.fbrowser.popup())
+
+        w = filemenu.add_name("Save")
+        w.set_tooltip("Save the loaded file")
+        w.add_callback('activated', lambda w: self.resave())
+
+        savemenu = filemenu.add_menu("Save as")
+        w = savemenu.add_name(".mdp file")
+        w.add_callback('activated', self.save_file_as_cb, '.mdp')
+        w = savemenu.add_name(".ecsv file")
+        w.add_callback('activated', self.save_file_as_cb, '.ecsv')
+        w = savemenu.add_name(".sbr file")
+        w.add_callback('activated', self.save_file_as_cb, '.sbr')
+
+        w = filemenu.add_name("Reload")
+        w.set_tooltip("Reload the loaded file (wipes out unsaved changes)")
+        w.add_callback('activated', lambda w: self.reload())
+
+        w = filemenu.add_name("New")
+        w.set_tooltip("Clear everything and start a new mask")
+        w.add_callback('activated', lambda w: self.new_mask())
+
+        vbox.add_widget(self.w.toolbar, stretch=0)
+
+        # File information
+        fr = Widgets.Frame("Loaded file")
+        vbox2 = Widgets.VBox()
+        vbox2.set_spacing(2)
+        vbox2.set_border_width(4)
+
+        vbox2.add_widget(Widgets.Label("File:"), stretch=0)
+        self.w.filepath = Widgets.TextEntry(editable=False)
+        vbox2.add_widget(self.w.filepath, stretch=0)
+        fr.set_widget(vbox2)
+        vbox.add_widget(fr, stretch=0)
+
         # MOIRCS FOV Controls with Checkboxes
         fr = Widgets.Frame("MOIRCS FOV Controls")
         fov_controls = Widgets.VBox()
+        fov_controls.set_border_width(4)
         fov_controls.set_spacing(3)
 
         hbox_fov = Widgets.HBox()
@@ -271,6 +323,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         fr_slit = Widgets.Frame("Slit and Hole Controls")
         vbox_slit = Widgets.VBox()
         vbox_slit.set_spacing(6)
+        vbox_slit.set_border_width(4)
 
         # Display Options (Slit/Hole ID, Comments, Show Excluded)
         hbox_sh_display = Widgets.HBox()
@@ -340,6 +393,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         fr_controls = Widgets.Frame("Grism and Spectra Controls")
         vbox_controls = Widgets.VBox()
         vbox_controls.set_spacing(6)
+        vbox_controls.set_border_width(4)
 
         # Display Options (Spectra / Slit ID)
         hbox_display = Widgets.HBox()
@@ -380,14 +434,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         for name in self.grismtypes:
             self.w.grism.append_text(name)
         self.w.grism.set_index(self.grismtypes.index(self.settings.get('grism')))
-        self.w.grism.add_callback('activated', lambda w, idx: self.set_grism())
+        self.w.grism.add_callback('activated', self.set_grism_cb)
         hbox_grism.add_widget(self.w.grism, stretch=0)
 
         vbox_controls.add_widget(hbox_grism, stretch=0)
 
         # Float parameter input using TextEntries
-        param_fields = ["directwave", "wavestart", "waveend", "dispersion1",
-                        "dispersion2", "dx1", "dx2", "tilt1", "tilt2"]
         labels = {"directwave": "Direct Wave (\u212B):",
                   "wavestart": "Wave Start (\u212B):",
                   "waveend": "Wave End (\u212B):",
@@ -399,12 +451,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                   "tilt2": "Tilt DET 2:",
                   }
 
-        self.textentries = {}
+        self.w.textentries = {}
         grid = Widgets.GridBox()
         grid.set_spacing(4)
 
         row = 0
-        for key in param_fields:
+        for key in self.param_fields:
             lbl = Widgets.Label(labels[key])
             entry = Widgets.TextEntry()
             val = self.grism_info.get(key, 0.0)
@@ -413,7 +465,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             grid.add_widget(lbl, row, 0, stretch=0)
             grid.add_widget(entry, row, 1, stretch=1)
-            self.textentries[key] = entry
+            self.w.textentries[key] = entry
             row += 1
         vbox_controls.add_widget(grid, stretch=0)
 
@@ -498,57 +550,20 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         dialog.add_callback('activated', self.confirm_center_dialog_cb)
         self.w.confirm_center_dialog = dialog
 
-        # --- Bottom Buttons (Load/Save/etc.) ---
-        btns = Widgets.HBox()
-        btns.set_spacing(4)
-
-        self.w.filepath = Widgets.TextEntry()
-        btn_browse = Widgets.Button("Load MDP")
-        btn_browse.set_tooltip("Load an MDP file")
         # Load MDP file dialog
-        self.w.fbrowser = Widgets.FileDialog(title="Select MDP file",
+        self.w.fbrowser = Widgets.FileDialog(title="Select file",
                                              parent=self.fv.w.root)
         self.w.fbrowser.set_mode('file')
-        self.w.fbrowser.add_ext_filter("MDP files", '.mdp')
+        self.w.fbrowser.add_ext_filter(".mdp files", '.mdp')
+        self.w.fbrowser.add_ext_filter(".escv files", '.ecsv')
         self.w.fbrowser.add_callback('activated', self.browse_file_cb)
-        btn_browse.add_callback('activated', lambda w: self.w.fbrowser.popup())
 
-        btn_reload = Widgets.Button("Reload")
-        btn_reload.set_tooltip("Reload the MDP file")
-        btn_reload.add_callback('activated', lambda w: self.load_file(self.w.filepath.get_text()))
-
-        btns.add_widget(btn_browse, stretch=0)
-        btns.add_widget(self.w.filepath, stretch=1)
-        btns.add_widget(btn_reload, stretch=0)
-        vbox.add_widget(btns, stretch=0)
-
-        btns = Widgets.HBox()
-        btns.set_spacing(4)
-
-        btn_save_mdp = Widgets.Button("Save MDP")
-        btn_save_mdp.set_tooltip("Save MDP file")
-        # Save MDP file dialog
-        self.w.save_mdp = Widgets.FileDialog(title="Save MDP file",
+        # Save file dialog
+        self.w.save_file = Widgets.FileDialog(title="Save file",
                                              parent=self.fv.w.root)
-        self.w.save_mdp.set_mode('save')
-        self.w.save_mdp.add_ext_filter(".mdp files", '.mdp')
-        self.w.save_mdp.add_callback('activated', self.save_mdp_file_cb)
-        btn_save_mdp.add_callback('activated', lambda w: self.w.save_mdp.popup())
-
-        btn_save_sbr = Widgets.Button("Save SBR")
-        btn_save_sbr.set_tooltip("Save SBR file")
-        # Save SBR file dialog
-        self.w.save_sbr = Widgets.FileDialog(title="Save SBR file",
-                                             parent=self.fv.w.root)
-        self.w.save_sbr.set_mode('save')
-        self.w.save_sbr.add_ext_filter(".sbr files", '.sbr')
-        self.w.save_sbr.add_callback('activated', self.save_sbr_file_cb)
-        btn_save_sbr.add_callback('activated', self.confirm_center_dialog)
-
-        btns.add_widget(Widgets.Label(''), stretch=1)
-        btns.add_widget(btn_save_mdp, stretch=0)
-        btns.add_widget(btn_save_sbr, stretch=0)
-        vbox.add_widget(btns, stretch=0)
+        self.w.save_file.set_mode('save')
+        self.w.save_file.add_ext_filter(".mdp files", '.mdp')
+        self.w.save_file.add_callback('activated', self.save_file_cb)
 
         btns = Widgets.HBox()
         btns.set_spacing(3)
@@ -573,13 +588,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.gui_up = True
 
     def set_entry_value(self, key, val):
-        if key in self.textentries:
-            self.textentries[key].set_text(str(val))
+        if key in self.w.textentries:
+            self.w.textentries[key].set_text(str(val))
 
     def get_entry_value(self, key):
-        if key in self.textentries:
+        if key in self.w.textentries:
             try:
-                return float(self.textentries[key].get_text().strip())
+                return float(self.w.textentries[key].get_text().strip())
 
             except ValueError:
                 return 0.0  # or log a warning
@@ -596,6 +611,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def set_fov_center(self, x, y):
         x, y = int(x), int(y)
         self.fov_center = (x, y)
+        self.w.fov_center_x.set_value(x)
+        self.w.fov_center_y.set_value(y)
         self.update_fov()
 
     def set_fov_center_from_image(self):
@@ -627,36 +644,116 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def load_file(self, filepath):
         if isinstance(filepath, tuple):
             filepath = filepath[0]
-        if filepath and os.path.exists(filepath):
-            self.mdp_filename = filepath
+        if not os.path.exists(filepath):
+            self.message_box('error', "Error", f"File not found: '{filepath}'")
+            return
+
+        _, ext = os.path.splitext(filepath)
+        ext = ext.lower()
+
+        if ext == '.mdp':
             self.load_mdp(filepath)
-            self.update_slits_spectra()
+
+        elif ext == '.ecsv':
+            self.load_ecsv(filepath)
+
+        else:
+            self.message_box('error', "Error",
+                             f"Don't know how to load a '{ext}' file")
+
+        self.load_filename = filepath
+        self.update_slits_spectra()
+
+    def reload(self):
+        path = self.load_filename
+        if len(path) == 0 or path == 'UNKNOWN_FILE':
+            self.message_box('error', "Error", "No file was loaded--use 'Load' button")
+            return
+
+        self.load_file(path)
+
+    def new_mask(self):
+        self.load_filename = 'UNKNOWN_FILE'
+        self.w.filepath.set_text('')
+        self.shapes = []
+        self._undo_stack = []
+
+        self.update_slits_spectra()
 
     def load_mdp(self, filepath):
         rows = mdp.load_mdp(filepath)
         self.shapes = rows
         self._undo_stack = []
 
-    def show_slit_and_hole_info(self):
+    def load_ecsv(self, filepath):
+        rows, tbl = mdp.load_ecsv(filepath)
+        self.shapes = rows
+        self._undo_stack = []
+        # restore image if possible
+        if 'image' in tbl.meta:
+            path = tbl.meta['image']
+            if os.path.exists(path):
+                self.fv.load_file(path, chname=self.chname)
+
+        # restore cut levels if possible
+        if 'cut_lo' in tbl.meta:
+            cut_lo = float(tbl.meta['cut_lo'])
+            cut_hi = float(tbl.meta['cut_hi'])
+            self.fitsimage.cut_levels(cut_lo, cut_hi)
+
+        # restore position angle if possible
+        if 'pa_deg' in tbl.meta:
+            self.pa_deg = float(tbl.meta['pa_deg'])
+            self.w.pa_deg.set_value(self.pa_deg)
+
+        # restore grism if possible
+        if 'grism' in tbl.meta:
+            grism_name = tbl.meta['grism']
+            self.set_grism(grism_name)
+
+            # restore changed parameters
+            grism_params = self.get_grism_info(grism_name)
+            for name in self.param_fields:
+                key = f'grism_param_{name}'
+                if key in tbl.meta:
+                    grism_params[name] = tbl.meta[key]
+            self.set_grism_params(grism_params)
+
+        # restore FOV center
+        fov_center_x = float(tbl.meta['fov_center_x'])
+        fov_center_y = float(tbl.meta['fov_center_y'])
+        self.set_fov_center(fov_center_x, fov_center_y)
+
+    def update_slit_and_hole_info(self):
         gbox = self.w.slits_gbox
         gbox.remove_all(delete=True)
 
         for i, shape in enumerate(self.shapes):
-            shape_type = 'Slit' if shape['type'].startswith('B') else 'Hole'
+            shape_type = 'Slit' if shape['type'] == 'slit' else 'Hole'
             comment = shape.get('comment', '')
             label = f"{shape_type} #{i} | x={shape['x']:.1f}, y={shape['y']:.1f} | {comment}"
 
             cb = Widgets.CheckBox(label)
             gbox.add_widget(cb, i, 0)
-            # Checked = included; Unchecked = either _deleted or _excluded
-            cb.set_state(not shape.get('_deleted', False) and not shape.get('_excluded', False))
+            # Checked = included; Unchecked = excluded
+            cb.set_state(not shape.get('excluded', False))
             cb.add_callback('activated', self.slit_manager_cb, i)
+            btn = Widgets.Button("Delete")
+            btn.add_callback('activated', self.delete_slit_cb, i)
+            gbox.add_widget(btn, i, 1)
 
+    def show_slit_and_hole_info(self):
+        self.update_slit_and_hole_info()
         self.w.slits_dialog.show()
 
     def slit_manager_cb(self, w, checked, i):
-        self.shapes[i]['_deleted'] = not checked
-        self.shapes[i]['_excluded'] = not checked
+        self.shapes[i]['excluded'] = not checked
+        self.update_slits_spectra()
+
+    def delete_slit_cb(self, w, i):
+        self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
+        self.shapes.pop(i)
+        self.update_slit_and_hole_info()
         self.update_slits_spectra()
 
     def toggle_show_excluded(self, val):
@@ -668,15 +765,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.message_box('info', "Info", "No shapes to analyze.")
             return
 
-        # Reset exclusions
-        for shape in self.shapes:
-            shape['_excluded'] = False
-
         excluded_count = 0
 
         def get_x_bounds(shape):
             x = shape['x']
-            if shape['type'].startswith('B'):
+            if shape['type'] == 'slit':
                 w = shape.get('width', 100.0)
             else:
                 w = shape.get('diameter', 30.0)
@@ -687,21 +780,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         for i in range(n):
             s1 = self.shapes[i]
-            if s1.get('_excluded'):
+            if s1.get('excluded'):
                 continue
 
             x1_min, x1_max = get_x_bounds(s1)
             ch1 = s1['y'] < y_center
 
             if (not self.is_within_fov_bounds(s1['x'], s1['y']) or
-                    not self.is_within_y_arcsec_limit(s1['y'], min_arcsec_from_center=3)):
-                s1['_excluded'] = True
+                not self.is_within_y_arcsec_limit(s1['y'], min_arcsec_from_center=3)):
+                s1['excluded'] = True
                 excluded_count += 1
                 continue
 
             for j in range(i + 1, n):
                 s2 = self.shapes[j]
-                if s2.get('_excluded'):
+                if s2.get('excluded'):
                     continue
 
                 ch2 = s2['y'] < y_center
@@ -710,9 +803,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
                 x2_min, x2_max = get_x_bounds(s2)
                 if x1_max >= x2_min and x2_max >= x1_min:
-                    s2['_excluded'] = True
+                    s2['excluded'] = True
                     excluded_count += 1
 
+        self.update_slit_and_hole_info()
         self.update_slits_spectra()
         self.message_box('info', "Auto Exclusion", f"Excluded {excluded_count} shape(s).")
 
@@ -880,16 +974,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         shape = {'x': x, 'y': y, 'comment': comment}
         if out_of_bounds:
             # Initially excluded from auto detection/export
-            shape['_excluded'] = True
+            shape['excluded'] = True
         if shape_type == 'slit':
-            shape.update({'type': 'B', 'width': 100,
+            shape.update({'type': 'slit', 'width': 100,
                           'length': 7, 'angle': 0, 'priority': '1'})
         else:
-            shape.update({'type': 'C', 'diameter': 30})
+            shape.update({'type': 'hole', 'diameter': 30})
         self.shapes.append(shape)
+        self.update_slit_and_hole_info()
         self.update_slits_spectra()
 
     def edit_slit_or_hole(self):
+        if len(self.shapes) == 0:
+            self.message_box('error', "Error", "No slits or holes to edit")
+            return
+
         dialog = Widgets.Dialog(title="Edit Slit or Hole",
                                 buttons=[("Apply", 0), ("Close", 1)])
         layout = dialog.get_content_area()
@@ -899,9 +998,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         id_map = {}
         j = 0
         for i, shape in enumerate(self.shapes):
-            if shape.get('_deleted'):
+            if shape.get('excluded', False):
                 continue
-            prefix = 'B' if shape['type'].startswith('B') else 'C'
+            prefix = 'B' if shape['type'] == 'slit' else 'C'
             label = f"{prefix}{i}: {shape.get('comment', '')}"
             combo.append_text(label)
             id_map[j] = shape
@@ -927,7 +1026,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             shape = id_map[index]
             add_field("X:", shape.get('x', ''))
             add_field("Y:", shape.get('y', ''))
-            if shape['type'].startswith('B'):
+            if shape['type'] == 'slit':
                 add_field("Width:", shape.get('width', ''))
                 add_field("Length:", shape.get('length', ''))
                 add_field("Angle:", shape.get('angle', ''))
@@ -951,7 +1050,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     self.message_box('warning', "Out of Bounds", "The specified position is outside the allowed FOV.", parent=dialog)
                     return
 
-                if shape['type'].startswith('B'):
+                if shape['type'] == 'slit':
                     width = float(current_fields["Width:"].get_text())
                     length = float(current_fields["Length:"].get_text())
                     angle = float(current_fields["Angle:"].get_text())
@@ -972,7 +1071,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 shape['x'] = x
                 shape['y'] = y
                 shape['comment'] = current_fields["Comment:"].get_text()
-                if shape['type'].startswith('B'):
+                if shape['type'] == 'slit':
                     shape['width'] = width
                     shape['length'] = length
                     shape['angle'] = angle
@@ -994,6 +1093,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return
         last_state = self._undo_stack.pop()
         self.shapes = last_state['shapes']
+        self.update_slit_and_hole_info()
         self.update_slits_spectra()
         self.logger.info("undo!")
 
@@ -1003,11 +1103,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         val = self.get_entry_value(key)
         self.grism_info[key] = val
 
-    def set_grism(self):
-        grism_name = self.w['grism'].get_text()
+    def set_grism(self, grism_name):
         self.settings.set(dict(grism=grism_name))
+        self.grism_name = grism_name
         self.grism_info = self.get_grism_info(grism_name)
 
+        self.w.grism.set_text(grism_name)
         self._updating_grism_params = True
         for key, val in self.grism_info.items():
             self.set_entry_value(key, val)
@@ -1015,22 +1116,29 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.draw_spectra()
 
+    def set_grism_cb(self, w, idx):
+        grism_name = w.get_text()
+        self.set_grism(grism_name)
+
     def update_all_grism_params(self):
-        for key in self.textentries:
+        for key in self.w.textentries:
             self.grism_info[key] = self.get_entry_value(key)
         self.draw_spectra()
 
-    def reset_grism_params(self):
-        grism_name = self.w['grism'].get_text()
-        original_info = self.get_grism_info(grism_name)
+    def set_grism_params(self, grism_info):
+        grism_name = self.grism_name
 
         self._updating_grism_params = True
-        for key in self.textentries:
-            val = original_info.get(key, 0.0)
+        for key in self.w.textentries:
+            val = grism_info.get(key, 0.0)
             self.set_entry_value(key, val)
             self.grism_info[key] = val
         self._updating_grism_params = False
         self.draw_spectra()
+
+    def reset_grism_params(self):
+        original_info = self.get_grism_info(self.grism_name)
+        self.set_grism_params(original_info)
 
     def draw_fov(self):
         # NOTE: account for FITS indexing vs. canvas indexing
@@ -1097,7 +1205,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         objects = []
         for i, shape in enumerate(self.shapes):
-            if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
+            if shape.get('excluded', False) and not self.show_excluded:
                 continue
 
             x, y = shape['x'], shape['y']
@@ -1117,12 +1225,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             if is_ch2 and not self.w.cb_ch2.get_state():
                 continue
 
-            if shape['type'].startswith('B'):
+            if shape['type'] == 'slit':
                 # Draw slit (box)
                 w = shape['width']
                 l = shape['length']
                 angle = shape.get('angle', 0.0) - self.pa_deg
-                color = 'purple' if shape.get('_excluded') else 'white'
+                color = 'purple' if shape.get('excluded') else 'white'
                 box = self.dc.Box(xcen, ycen, w * 0.5, l * 0.5,
                                   rot_deg=angle,
                                   color=color, linewidth=1)
@@ -1139,12 +1247,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                                 rot_deg=angle)
                     objects.append(comment_text)
 
-            elif shape['type'].startswith('C'):
+            elif shape['type'] == 'hole':
                 # Draw hole (circle)
                 diameter = shape.get('diameter', 30.0)
                 radius = diameter / 2
                 angle = - self.pa_deg
-                color = 'purple' if shape.get('_excluded') else 'yellow'
+                color = 'purple' if shape.get('excluded') else 'yellow'
                 objects.append(self.dc.Circle(xcen, ycen, radius,
                                               color=color, linewidth=1))
 
@@ -1175,7 +1283,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return
 
         g = self.grism_info
-        if not g:
+        if g is None:
             self.fitsimage.redraw(whence=3)
             return
 
@@ -1235,7 +1343,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # --- Draw shapes ---
         for i, shape in enumerate(self.shapes):
-            if shape.get('_deleted') or (shape.get('_excluded') and not self.show_excluded):
+            if shape.get('excluded') and not self.show_excluded:
                 continue
 
             # NOTE: account for FITS indexing vs. canvas indexing
@@ -1248,7 +1356,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             if (is_det1 and not self.w.cb_ch1.get_state()) or (not is_det1 and not self.w.cb_ch2.get_state()):
                 continue
 
-            width = shape.get('width', 100.0) if shape['type'].startswith('B') else shape.get('diameter', 30.0)
+            width = shape.get('width', 100.0) if shape['type'] == 'slit' else shape.get('diameter', 30.0)
             interval_y = 100
 
             if is_det1:
@@ -1302,30 +1410,51 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.pa_deg = val
         self.update_fov()
 
-    def save_mdp_file_cb(self, w, paths):
+    def save_file_as_cb(self, w, fext):
+        self._save_fext = fext
+        self.w.save_file.clear_filters()
+        self.w.save_file.add_ext_filter(f"{fext} files", fext)
+        self.w.save_file.popup()
+
+    def save_file_cb(self, w, paths):
         if len(paths) == 0:
             return
-        filename = paths[0]
+        self.save_file(paths[0])
 
-        with open(filename, 'w') as f:
-            for shape in self.shapes:
-                x = shape['x']
-                y = shape['y']
-                comment = shape.get('comment', '')
-                if shape['type'].startswith('B'):
-                    w = shape['width']
-                    l = shape['length']
-                    a = shape['angle']
-                    line = f"{x:.2f} {y:.2f} {w:.0f} {l:.0f} {a:.0f} 1 B, {comment}\n"
-                else:
-                    d = shape['diameter']
-                    line = f"{x:.2f} {y:.2f} {d:.0f} {d:.0f} 0 0 C, {comment}\n"
-                if shape.get('_deleted') or shape.get('_excluded'):
-                    f.write(f"# {line}")
-                else:
-                    f.write(line)
+    def resave(self):
+        path = self.load_filename
+        if len(path) == 0 or path == 'UNKNOWN_FILE':
+            self.message_box('error', "Error", "No file was loaded--use 'Load' button")
+            return
 
-    def confirm_center_dialog(self, w):
+        self.save_file(path)
+
+    def save_file(self, path):
+        _, fext = os.path.splitext(path)
+        fext = fext.lower()
+        if len(fext) == 0:
+            fext = self._save_fext
+            if fext == '':
+                self.message_box('error', "Error",
+                                 f"Please specify an extension on the file (.mdp, .ecsv, .sbr)")
+                return
+            else:
+                path = path + fext
+
+        if fext == '.mdp':
+            self.write_mdp_file(path)
+
+        elif fext == '.ecsv':
+            self.write_ecsv_file(path)
+
+        elif fext == '.sbr':
+            self.confirm_center_dialog()
+
+        else:
+            self.message_box('error', "Error",
+                             f"Don't know how to save a '{fext}' file")
+
+    def confirm_center_dialog(self):
         dialog = self.w.confirm_center_dialog
         content = dialog.get_content_area()
         content.remove_all(delete=True)
@@ -1344,12 +1473,27 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # ok-- go ahead and show the Save SBR dialog
         self.w.save_sbr.popup()
 
+    def write_mdp_file(self, path):
+        try:
+            if True:
+                buf = mdp.mdp2buf(self.shapes)
+            else:
+                tbl = mdp.rows2table(self.shapes)
+                buf = mdp.table2mdp(tbl)
+
+            with open(path, 'w') as out_f:
+                out_f.write(buf)
+
+        except IOError as e:
+            self.message_box('critical', "Error", f"Failed to write MDP file: {str(e)}")
+        else:
+            self.message_box('info', "Status", f"Wrote MDP file: {path}")
+
     def write_sbr_file(self, path):
         try:
-            shapes_filtered = [s for s in self.shapes
-                               if not s.get('_deleted')]
+            shapes = [s for s in self.shapes if not s.get('excluded', False)]
 
-            tbl = mdp.rows2table(shapes_filtered)
+            tbl = mdp.rows2table(shapes)
             buf, warnings = mdp.table2sbr(tbl, self.fov_center,
                                           self.pixel_scale)
 
@@ -1359,7 +1503,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             fov_x_ctr, fov_y_ctr = self.fov_center
 
             with open(path, 'w') as out_f:
-                out_f.write(f"# MDP: {self.mdp_filename}\n")
+                out_f.write(f"# File: {self.load_filename}\n")
                 out_f.write(f"# Image: {self.fits_filename}\n")
                 out_f.write(f"# FOV Center: x={fov_x_ctr:.2f}, y={fov_y_ctr:.2f}\n")
                 out_f.write(buf)
@@ -1376,6 +1520,34 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         path = paths[0]
         self.write_sbr_file(path)
+
+    def write_ecsv_file(self, path):
+        try:
+            shapes = self.shapes
+            tbl = mdp.rows2table(shapes)
+
+            # save metadata
+            tbl.meta['image'] = self.fits_filename
+            tbl.meta['fov_center_x'] = self.fov_center[0]
+            tbl.meta['fov_center_y'] = self.fov_center[1]
+            tbl.meta['grism'] = self.grism_name
+            for name in self.param_fields:
+                tbl.meta[f'grism_param_{name}'] = self.grism_info[name]
+            tbl.meta['pa_deg'] = self.pa_deg
+            cut_lo, cut_hi = self.fitsimage.get_cut_levels()
+            tbl.meta['cut_lo'] = cut_lo
+            tbl.meta['cut_hi'] = cut_hi
+            now = datetime.now()
+            tbl.meta['save_date'] = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            with open(path, 'w') as out_f:
+                tbl.write(out_f, format='ascii.ecsv', delimiter=',',
+                          quotechar='"')
+
+        except IOError as e:
+            self.message_box('critical', "Error", f"Failed to write ECSV file: {str(e)}")
+        else:
+            self.message_box('info', "Status", f"Wrote ECSV file: {path}")
 
     def message_box(self, category, title, message, parent=None):
         warn = Widgets.MessageDialog(title=title, modal=False,
