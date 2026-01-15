@@ -218,7 +218,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         filemenu = self.w.toolbar.add_menu("File...", mtype='menu')
 
         w = filemenu.add_name("Load")
-        w.set_tooltip("Load an MDP or ECSV file")
+        w.set_tooltip("Load a FITS, MDP or ECSV file")
         w.add_callback('activated', lambda w: self.w.fbrowser.popup())
 
         w = filemenu.add_name("Save")
@@ -231,7 +231,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         w = savemenu.add_name(".ecsv file")
         w.add_callback('activated', self.save_file_as_cb, '.ecsv')
         w = savemenu.add_name(".sbr file")
-        w.add_callback('activated', self.save_file_as_cb, '.sbr')
+        w.add_callback('activated', lambda w: self.confirm_center_dialog())
 
         w = filemenu.add_name("Reload")
         w.set_tooltip("Reload the loaded file (wipes out unsaved changes)")
@@ -554,6 +554,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.w.fbrowser = Widgets.FileDialog(title="Select file",
                                              parent=self.fv.w.root)
         self.w.fbrowser.set_mode('file')
+        self.w.fbrowser.add_ext_filter(".fits files", '.fits')
         self.w.fbrowser.add_ext_filter(".mdp files", '.mdp')
         self.w.fbrowser.add_ext_filter(".escv files", '.ecsv')
         self.w.fbrowser.add_callback('activated', self.browse_file_cb)
@@ -638,7 +639,6 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def browse_file_cb(self, w, paths):
         if len(paths) > 0:
             file_path = paths[0]
-            self.w.filepath.set_text(file_path)
             self.load_file(file_path)
 
     def load_file(self, filepath):
@@ -651,23 +651,27 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         _, ext = os.path.splitext(filepath)
         ext = ext.lower()
 
-        if ext == '.mdp':
+        if ext == '.fits':
+            self.load_fits(filepath)
+
+        elif ext == '.mdp':
+            self.w.filepath.set_text(filepath)
             self.load_mdp(filepath)
 
         elif ext == '.ecsv':
+            self.w.filepath.set_text(filepath)
             self.load_ecsv(filepath)
 
         else:
             self.message_box('error', "Error",
                              f"Don't know how to load a '{ext}' file")
 
-        self.load_filename = filepath
         self.update_slits_spectra()
 
     def reload(self):
         path = self.load_filename
         if len(path) == 0 or path == 'UNKNOWN_FILE':
-            self.message_box('error', "Error", "No file was loaded--use 'Load' button")
+            self.message_box('error', "Error", "No file was loaded--use 'File->Load' menu")
             return
 
         self.load_file(path)
@@ -680,15 +684,21 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.update_slits_spectra()
 
+    def load_fits(self, filepath):
+        self.fv.load_file(filepath, chname=self.channel.name)
+
     def load_mdp(self, filepath):
         rows = mdp.load_mdp(filepath)
         self.shapes = rows
         self._undo_stack = []
+        self.load_filename = filepath
 
     def load_ecsv(self, filepath):
         rows, tbl = mdp.load_ecsv(filepath)
         self.shapes = rows
         self._undo_stack = []
+        self.load_filename = filepath
+
         # restore image if possible
         if 'image' in tbl.meta:
             path = tbl.meta['image']
@@ -1169,7 +1179,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         r_ht = (self.det_fov[1] * 60) / self.pixel_scale * 0.5
         if self.w.cb_ch1.get_state():
             d1 = self.dc.Box(xc, yc - offset, r_wd, r_ht, rot_deg=rot_deg,
-                             linewidth=1, linestyle='solid', color='yellow')
+                             linewidth=2, linestyle='solid', color='yellow')
             t1 = self.dc.Text(xc + r_wd, yc - offset - r_ht, text="DET 1",
                               color='yellow', bgcolor='black', bgalpha=1.0,
                               rot_deg=rot_deg)
@@ -1177,7 +1187,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         if self.w.cb_ch2.get_state():
             d2 = self.dc.Box(xc, yc + offset, r_wd, r_ht, rot_deg=rot_deg,
-                             linewidth=1, linestyle='solid', color='pink')
+                             linewidth=2, linestyle='solid', color='pink')
             t2 = self.dc.Text(xc + r_wd, yc + offset + r_ht, text="DET 2",
                               color='pink', bgcolor='black', bgalpha=1.0,
                               rot_deg=rot_deg)
@@ -1448,7 +1458,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.write_ecsv_file(path)
 
         elif fext == '.sbr':
-            self.confirm_center_dialog()
+            self.write_sbr_file(path)
 
         else:
             self.message_box('error', "Error",
@@ -1462,7 +1472,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         fov_x_ctr, fov_y_ctr = self.fov_center
         lbl = f"FOV center X: ({fov_x_ctr:.2f}), Y: ({fov_y_ctr:.2f})"
         content.add_widget(Widgets.Label(lbl))
-        content.add_widget(Widgets.Label("Cancel and change up top if needed"))
+        content.add_widget(Widgets.Label("Confirm or cancel and change as needed"))
         dialog.show()
 
     def confirm_center_dialog_cb(self, w, val):
@@ -1471,7 +1481,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             # cancel
             return
         # ok-- go ahead and show the Save SBR dialog
-        self.w.save_sbr.popup()
+        _dir, filename = os.path.split(self.load_filename)
+        filename, _ext = os.path.splitext(filename)
+        self.w.save_file.set_directory(_dir)
+        if hasattr(self.w.save_file, 'set_filename'):
+            self.w.save_file.set_filename(filename + '.sbr')
+        self.save_file_as_cb(w, '.sbr')
 
     def write_mdp_file(self, path):
         try:
