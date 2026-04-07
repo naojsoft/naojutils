@@ -301,8 +301,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         fov_controls.add_widget(hbox_center, stretch=0)
 
         hbox = Widgets.HBox()
-        hbox.add_widget(Widgets.Label("Image PA:", halign='right'), stretch=0)
-        pa_lbl = Widgets.Label(f"{self.image_pa_deg:.1f}")
+        hbox.add_widget(Widgets.Label("MOIRCS PA:", halign='right'), stretch=0)
+        # NOTE: Tanaka-san says PA should be shown as negated for MOIRCS
+        pa_lbl = Widgets.Label(f"{-self.image_pa_deg:.1f}")
         self.w.pa_lbl = pa_lbl
         hbox.add_widget(pa_lbl, stretch=0)
         hbox.add_widget(Widgets.Label(""), stretch=1)
@@ -310,7 +311,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.w.pa_deg = Widgets.SpinBox(dtype=float)
         self.w.pa_deg.set_limits(-180.0, 180.0, 1.0)
         self.w.pa_deg.set_value(0.0)
-        self.w.pa_deg.set_tooltip("Set the delta to Position Angle of the field")
+        # NOTE: Tanaka-san says disable this function until we can get it right
+        self.w.pa_deg.set_enabled(False)
+        #self.w.pa_deg.set_tooltip("Set the delta to Position Angle of the field")
+        self.w.pa_deg.set_tooltip("** This feature disabled for now **")
         self.w.pa_deg.add_callback('value-changed', self.set_pa_cb)
         hbox.add_widget(self.w.pa_deg, stretch=0)
         hbox.add_widget(Widgets.Label(''), stretch=1)
@@ -534,7 +538,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         content = dialog.get_content_area()
         content.set_border_width(4)
         scroll = Widgets.ScrollArea()
-        gbox = Widgets.GridBox(columns=1)
+        gbox = Widgets.GridBox(columns=6)
         scroll.set_widget(gbox)
         content.add_widget(scroll, stretch=1)
         self.w.slits_gbox = gbox
@@ -738,19 +742,26 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         gbox = self.w.slits_gbox
         gbox.remove_all(delete=True)
 
-        for i, shape in enumerate(self.shapes):
+        # add header
+        # TODO: should we use a TreeView for this?
+        for i, hdr in enumerate(["Included", "X", "Y", "Comment", "Priority"]):
+            gbox.add_widget(Widgets.Label(hdr), 0, i)
+
+        for i, shape in enumerate(self.shapes, 1):
             shape_type = 'Slit' if shape['type'] == 'slit' else 'Hole'
             comment = shape.get('comment', '')
-            label = f"{shape_type} #{i} | x={shape['x']:.1f}, y={shape['y']:.1f} | {comment}"
-
-            cb = Widgets.CheckBox(label)
+            cb = Widgets.CheckBox(f"{shape_type} #{i}")
             gbox.add_widget(cb, i, 0)
             # Checked = included; Unchecked = excluded
             cb.set_state(not shape.get('excluded', False))
-            cb.add_callback('activated', self.slit_manager_cb, i)
+            cb.add_callback('activated', self.slit_manager_cb, i - 1)
+            gbox.add_widget(Widgets.Label(f"{shape['x']:.1f}"), i, 1)
+            gbox.add_widget(Widgets.Label(f"{shape['y']:.1f}"), i, 2)
+            gbox.add_widget(Widgets.Label(f"{comment}"), i, 3)
+            gbox.add_widget(Widgets.Label(f"{shape['priority']:.2f}"), i, 4)
             btn = Widgets.Button("Delete")
-            btn.add_callback('activated', self.delete_slit_cb, i)
-            gbox.add_widget(btn, i, 1)
+            btn.add_callback('activated', self.delete_slit_cb, i - 1)
+            gbox.add_widget(btn, i, 5)
 
     def show_slit_and_hole_info(self):
         self.update_slit_and_hole_info()
@@ -791,6 +802,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         for i in range(n):
             s1 = self.shapes[i]
             if s1.get('excluded'):
+                continue
+            # according to Tanaka-san, we should not exclude holes
+            if s1.get('type') != 'slit':
                 continue
 
             x1_min, x1_max = get_x_bounds(s1)
@@ -901,7 +915,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         x_str = dialog.x.get_text().strip()
         y_str = dialog.y.get_text().strip()
         try:
-            data_x, data_y = float(x_str), float(y_str)
+            data_x, data_y = float(x_str) - 1, float(y_str) - 1
         except ValueError:
             self.message_box('error', "Error", "Bad value for X or Y")
             return
@@ -987,9 +1001,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             shape['excluded'] = True
         if shape_type == 'slit':
             shape.update({'type': 'slit', 'width': 100,
-                          'length': 7, 'angle': 0, 'priority': '1'})
+                          'length': 7, 'angle': 0, 'priority': 1})
         else:
-            shape.update({'type': 'hole', 'diameter': 30})
+            shape.update({'type': 'hole', 'diameter': 30, 'priority': 1})
         self.shapes.append(shape)
         self.update_slit_and_hole_info()
         self.update_slits_spectra()
@@ -1042,6 +1056,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 add_field("Angle:", shape.get('angle', ''))
             else:
                 add_field("Diameter:", shape.get('diameter', ''))
+            add_field("Priority:", shape.get('priority', ''))
             add_field("Comment:", shape.get('comment', ''))
 
         combo.add_callback('activated', lambda w, idx: populate_fields(idx))
@@ -1061,9 +1076,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     return
 
                 if shape['type'] == 'slit':
-                    width = float(current_fields["Width:"].get_text())
-                    length = float(current_fields["Length:"].get_text())
-                    angle = float(current_fields["Angle:"].get_text())
+                    width = float(current_fields["Width:"].get_text().strip())
+                    length = float(current_fields["Length:"].get_text().strip())
+                    angle = float(current_fields["Angle:"].get_text().strip())
                     if width < 35:
                         self.message_box('warning', "Invalid input", "Width must be at least 35.",
                                          parent=dialog)
@@ -1072,7 +1087,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                         self.message_box('warning', "Invalid input", "Length must be at least 6.8.", parent=dialog)
                         return
                 else:
-                    diameter = float(current_fields["Diameter:"].get_text())
+                    diameter = float(current_fields["Diameter:"].get_text().strip())
                     if diameter < 20 or diameter > 30:
                         self.message_box('warning', "Invalid input", "Diameter must be between 20 and 30.", parent=dialog)
                         return
@@ -1080,7 +1095,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
                 shape['x'] = x
                 shape['y'] = y
-                shape['comment'] = current_fields["Comment:"].get_text()
+                shape['priority'] = float(current_fields["Priority:"].get_text().strip())
+                shape['comment'] = current_fields["Comment:"].get_text().strip()
                 if shape['type'] == 'slit':
                     shape['width'] = width
                     shape['length'] = length
@@ -1397,7 +1413,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                       (xcen - width * 0.5, spec_y2)]
             # TODO: rotate points according to tilt?
             poly = self.dc.Polygon(points, color=color,
-                                   linewidth=1, fill=False, coord='data')
+                                   linewidth=1, fill=True,
+                                   fillcolor=color, fillalpha=0.3,
+                                   coord='data')
             poly.crdmap = self.fitsimage.get_coordmap('data')
             poly.rotate_deg([tilt_deg], (xcen, ycen))
             objects.append(poly)
@@ -1639,7 +1657,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 self.logger.error(f"failed to get scale of image: {e}",
                                   exc_info=True)
 
-        self.w.pa_lbl.set_text(f"{self.image_pa_deg:.1f}")
+        # NOTE: Tanaka-san says PA should be shown as negated for MOIRCS
+        self.w.pa_lbl.set_text(f"{-self.image_pa_deg:.1f}")
         self.logger.info(f"setting pixel scale to {self.pixel_scale:.5f}")
 
         x, y = self.fov_center

@@ -51,10 +51,10 @@ def load_mdp(path):
                 'type': 'hole' if otype.startswith('C') else 'slit',
                 'x': float(parts[0]),
                 'y': float(parts[1]),
-                'width': float(parts[2]),
-                'length': float(parts[3]),
+                'length': float(parts[2]),
+                'width': float(parts[3]),
                 'angle': float(parts[4]),
-                'priority': parts[5],
+                'priority': float(parts[5]),
                 'excluded': False,
                 'comment': " ".join(parts[7:]) if len(parts) > 7 else ''
             }
@@ -77,10 +77,10 @@ def mdp2buf(rows):
         y = shape['y']
         comment = shape.get('comment', '')
         if shape['type'] == 'slit':
-            w = shape['width']
             l = shape['length']
+            w = shape['width']
             a = shape['angle']
-            line = f"{x:.2f} {y:.2f} {w:.0f} {l:.0f} {a:.0f} 1 B, {comment}\n"
+            line = f"{x:.2f} {y:.2f} {l:.0f} {w:.0f} {a:.0f} 1 B, {comment}\n"
         else:
             d = shape['diameter']
             line = f"{x:.2f} {y:.2f} {d:.0f} {d:.0f} 0 0 C, {comment}\n"
@@ -126,15 +126,16 @@ def table2mdp(table):
     for row in table:
         x = row['x']
         y = row['y']
+        p = row.get('priority', 1)
         comment = row.get('comment', '')
         if row['type'] == 'slit':
             w = row['slit_width']
             l = row['slit_length']
             a = row['angle']
-            line = f"{x:.2f} {y:.2f} {w:.0f} {l:.0f} {a:.0f} 1 B, {comment}\n"
+            line = f"{x:.2f} {y:.2f} {w:.2f} {l:.2f} {a:.2f} {p:.2f} B, {comment}"
         else:
             d = row['slit_width']
-            line = f"{x:.2f} {y:.2f} {d:.0f} {d:.0f} 0 0 C, {comment}\n"
+            line = f"{x:.2f} {y:.2f} {d:.2f} {d:.2f} 0 {p:.2f} C, {comment}"
 
         if row['excluded']:
             lines.append(f"# {line}")
