@@ -975,7 +975,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.message_box('error', "Error", "Please enter numerical values for X and Y.")
             return
 
-        self.add_shape(x, y, shape_type, comment=comment)
+        shape = self.add_shape(x, y, shape_type, comment=comment)
+        self.edit_slit_or_hole(edit_shape=shape)
 
     def is_within_fov_bounds(self, x, y):
         """Check if (x, y) is within MOIRCS rectangle in x, and
@@ -1020,7 +1021,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.update_slits_spectra()
         return shape
 
-    def edit_slit_or_hole(self):
+    def edit_slit_or_hole(self, edit_shape=None):
         if len(self.shapes) == 0:
             self.message_box('error', "Error", "No slits or holes to edit")
             return
@@ -1033,9 +1034,12 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         combo = Widgets.ComboBox()
         id_map = {}
         j = 0
+        edit_index = 0
         for i, shape in enumerate(self.shapes):
             if shape.get('excluded', False):
                 continue
+            if edit_shape is not None and edit_shape is shape:
+                edit_index = i
             prefix = 'B' if shape['type'] == 'slit' else 'C'
             label = f"{prefix}{i}: {shape.get('comment', '')}"
             combo.append_text(label)
@@ -1072,7 +1076,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             add_field("Comment:", shape.get('comment', ''))
 
         combo.add_callback('activated', lambda w, idx: populate_fields(idx))
-        populate_fields(0)
+        combo.set_index(edit_index)
+        populate_fields(edit_index)
 
         def apply_changes(w, val):
             if val == 1:
