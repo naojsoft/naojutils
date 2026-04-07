@@ -791,10 +791,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         def get_x_bounds(shape):
             x = shape['x']
             if shape['type'] == 'slit':
-                w = shape.get('width', 100.0)
+                wd = shape.get('length', 100.0)
             else:
-                w = shape.get('diameter', 30.0)
-            return x - w / 2, x + w / 2
+                wd = shape.get('diameter', 30.0)
+            return x - wd * 0.5, x + wd * 0.5
 
         y_center = self.fov_center[1]
         n = len(self.shapes)
@@ -1000,8 +1000,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             # Initially excluded from auto detection/export
             shape['excluded'] = True
         if shape_type == 'slit':
-            shape.update({'type': 'slit', 'width': 100,
-                          'length': 7, 'angle': 0, 'priority': 1})
+            shape.update({'type': 'slit', 'length': 100,
+                          'width': 7, 'angle': 0, 'priority': 1})
         else:
             shape.update({'type': 'hole', 'diameter': 30, 'priority': 1})
         self.shapes.append(shape)
@@ -1051,8 +1051,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             add_field("X:", shape.get('x', ''))
             add_field("Y:", shape.get('y', ''))
             if shape['type'] == 'slit':
-                add_field("Width:", shape.get('width', ''))
                 add_field("Length:", shape.get('length', ''))
+                add_field("Width:", shape.get('width', ''))
                 add_field("Angle:", shape.get('angle', ''))
             else:
                 add_field("Diameter:", shape.get('diameter', ''))
@@ -1253,22 +1253,24 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             if shape['type'] == 'slit':
                 # Draw slit (box)
-                w = shape['width']
-                l = shape['length']
+                wd = shape['length']
+                ht = shape['width']
                 angle = shape.get('angle', 0.0) - self.pa_deg
                 color = 'purple' if shape.get('excluded') else 'white'
-                box = self.dc.Box(xcen, ycen, w * 0.5, l * 0.5,
+                box = self.dc.Box(xcen, ycen, wd * 0.5, ht * 0.5,
                                   rot_deg=angle,
                                   color=color, linewidth=1)
                 objects.append(box)
 
                 if show_ids:
-                    objects.append(self.dc.Text(xcen, ycen + l / 2 + 10,
+                    objects.append(self.dc.Text(xcen + wd * 0.5,
+                                                ycen + ht * 0.5 + 10,
                                                 text=f"{i}", color='white',
                                                 fontsize=11, rot_deg=angle))
 
                 if show_comments and comment:
-                    comment_text = self.dc.Text(xcen, ycen - l / 2 - 30,
+                    comment_text = self.dc.Text(xcen + wd * 0.5,
+                                                ycen - ht * 0.5 - 30,
                                                 text=comment, color='white',
                                                 rot_deg=angle)
                     objects.append(comment_text)
@@ -1283,12 +1285,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                               color=color, linewidth=1))
 
                 if show_ids:
-                    objects.append(self.dc.Text(xcen, ycen + radius + 10,
+                    objects.append(self.dc.Text(xcen + radius,
+                                                ycen + radius + 10,
                                                 text=f"{i}", color='yellow',
                                                 fontsize=11, rot_deg=angle))
 
                 if show_comments and comment:
-                    objects.append(self.dc.Text(xcen,
+                    objects.append(self.dc.Text(xcen + radius,
                                                 ycen - radius - 30,
                                                 text=comment, color='yellow',
                                                 rot_deg=angle))
@@ -1382,7 +1385,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             if (is_det1 and not self.w.cb_ch1.get_state()) or (not is_det1 and not self.w.cb_ch2.get_state()):
                 continue
 
-            width = shape.get('width', 100.0) if shape['type'] == 'slit' else shape.get('diameter', 30.0)
+            width = shape.get('length', 100.0) if shape['type'] == 'slit' else shape.get('diameter', 30.0)
             interval_y = 100
 
             if is_det1:
