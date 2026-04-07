@@ -295,14 +295,14 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         hbox_center.set_spacing(4)
         hbox_center.add_widget(Widgets.Label("FOV Center X:", halign='right'),
                                stretch=0)
-        self.w.fov_center_x = Widgets.SpinBox()
-        self.w.fov_center_x.set_limits(0, 7000, 1)
+        self.w.fov_center_x = Widgets.SpinBox(dtype=float)
+        self.w.fov_center_x.set_limits(0, 10000, 0.1)
         self.w.fov_center_x.set_value(self.fov_center[0])
         hbox_center.add_widget(self.w.fov_center_x, stretch=0)
 
         hbox_center.add_widget(Widgets.Label("Y:", halign='right'), stretch=0)
-        self.w.fov_center_y = Widgets.SpinBox()
-        self.w.fov_center_y.set_limits(0, 7000, 1)
+        self.w.fov_center_y = Widgets.SpinBox(dtype=float)
+        self.w.fov_center_y.set_limits(0, 10000, 0.1)
         self.w.fov_center_y.set_value(self.fov_center[1])
         hbox_center.add_widget(self.w.fov_center_y, stretch=0)
 
