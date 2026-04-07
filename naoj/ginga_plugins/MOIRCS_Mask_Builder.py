@@ -207,6 +207,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.valid_intervals = ['None', '100', '250', '500', '1000']
         self.fov_center = (default_x_ctr, default_y_ctr)
         self.det_fov = [3.97, 4.0]  # detector dimensions in arcminute
+        # for slits
+        self.default_length = 100
+        self.default_width = 7
+        # for holes
+        self.default_diameter = 30
         self.gui_up = False
 
     def build_gui(self, container):
@@ -795,9 +800,9 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         def get_x_bounds(shape):
             x = shape['x']
             if shape['type'] == 'slit':
-                wd = shape.get('length', 100.0)
+                wd = shape.get('length', self.default_length)
             else:
-                wd = shape.get('diameter', 30.0)
+                wd = shape.get('diameter', self.default_width)
             return x - wd * 0.5, x + wd * 0.5
 
         y_center = self.fov_center[1]
@@ -1004,13 +1009,16 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             # Initially excluded from auto detection/export
             shape['excluded'] = True
         if shape_type == 'slit':
-            shape.update({'type': 'slit', 'length': 100,
-                          'width': 7, 'angle': 0, 'priority': 1})
+            shape.update({'type': 'slit', 'length': self.default_length,
+                          'width': self.default_width, 'angle': 0,
+                          'priority': 1})
         else:
-            shape.update({'type': 'hole', 'diameter': 30, 'priority': 1})
+            shape.update({'type': 'hole', 'diameter': self.default_diameter,
+                          'priority': 1})
         self.shapes.append(shape)
         self.update_slit_and_hole_info()
         self.update_slits_spectra()
+        return shape
 
     def edit_slit_or_hole(self):
         if len(self.shapes) == 0:
@@ -1082,19 +1090,26 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 if shape['type'] == 'slit':
                     width = float(current_fields["Width:"].get_text().strip())
                     length = float(current_fields["Length:"].get_text().strip())
+                    # NOTE: for now, editing the width and length here
+                    # sets the default width and length for future slits
+                    self.default_width = width
+                    self.default_length = length
                     angle = float(current_fields["Angle:"].get_text().strip())
-                    if width < 35:
-                        self.message_box('warning', "Invalid input", "Width must be at least 35.",
+                    if length < 35:
+                        self.message_box('warning', "Invalid input", "Length must be at least 35.",
                                          parent=dialog)
                         return
-                    if length < 6.8:
-                        self.message_box('warning', "Invalid input", "Length must be at least 6.8.", parent=dialog)
+                    if width < 6.8:
+                        self.message_box('warning', "Invalid input", "Width must be at least 6.8.", parent=dialog)
                         return
                 else:
                     diameter = float(current_fields["Diameter:"].get_text().strip())
                     if diameter < 20 or diameter > 30:
                         self.message_box('warning', "Invalid input", "Diameter must be between 20 and 30.", parent=dialog)
                         return
+                    # NOTE: for now, editing the doiameter here
+                    # sets the default diameter for future holes
+                    self.default_diameter = diameter
 
                 self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
                 shape['x'] = x
@@ -1281,7 +1296,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             elif shape['type'] == 'hole':
                 # Draw hole (circle)
-                diameter = shape.get('diameter', 30.0)
+                diameter = shape.get('diameter', self.default_diameter)
                 radius = diameter / 2
                 angle = - self.pa_deg
                 color = 'purple' if shape.get('excluded') else 'yellow'
@@ -1389,7 +1404,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             if (is_det1 and not self.w.cb_ch1.get_state()) or (not is_det1 and not self.w.cb_ch2.get_state()):
                 continue
 
-            width = shape.get('length', 100.0) if shape['type'] == 'slit' else shape.get('diameter', 30.0)
+            width = shape.get('length', self.default_length) if shape['type'] == 'slit' else shape.get('diameter', self.default_diameter)
             interval_y = 100
 
             if is_det1:
