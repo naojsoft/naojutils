@@ -206,7 +206,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # unit of angstroms
         self.valid_intervals = ['None', '100', '250', '500', '1000']
         self.fov_center = (default_x_ctr, default_y_ctr)
-        self.det_fov = [3.97, 4.0]  # detector dimensions in arcminute
+        self.det_fov = [3.8688, 4.0]  # detector dimensions in arcminute
+        # detector offsets in px
+        self.det_offset_x = -32
+        self.det_offset_y = 0
         # for slits
         self.default_length = 100
         self.default_width = 7
@@ -1215,24 +1218,32 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # calc offset from center pixel to upper and lower box centers
         offset = (1.5 * 60) / self.pixel_scale
+
+        # NOTE: offsets requested from Tanaka-san for detectors
+        xc_det, yc_det = xc + self.det_offset_x, yc + self.det_offset_y
+
         r_wd = (self.det_fov[0] * 60) / self.pixel_scale * 0.5
         r_ht = (self.det_fov[1] * 60) / self.pixel_scale * 0.5
         if self.w.cb_ch1.get_state():
-            d1 = self.dc.Box(xc, yc - offset, r_wd, r_ht, rot_deg=rot_deg,
+            d1 = self.dc.Box(xc_det, yc_det - offset, r_wd, r_ht,
+                             rot_deg=rot_deg,
                              linewidth=2, linestyle='solid', color='yellow')
-            t1 = self.dc.Text(xc + r_wd, yc - offset - r_ht, text="DET 1",
-                              color='yellow', bgcolor='black', bgalpha=1.0,
+            t1 = self.dc.Text(xc_det + r_wd, yc_det - offset - r_ht,
+                              text="DET 1", color='yellow',
+                              bgcolor='black', bgalpha=1.0,
                               rot_deg=rot_deg)
             objs.extend([d1, t1])
 
         if self.w.cb_ch2.get_state():
-            d2 = self.dc.Box(xc, yc + offset, r_wd, r_ht, rot_deg=rot_deg,
+            d2 = self.dc.Box(xc_det, yc_det + offset, r_wd, r_ht,
+                             rot_deg=rot_deg,
                              linewidth=2, linestyle='solid', color='pink')
-            t2 = self.dc.Text(xc + r_wd, yc + offset + r_ht, text="DET 2",
-                              color='pink', bgcolor='black', bgalpha=1.0,
+            t2 = self.dc.Text(xc_det + r_wd, yc_det + offset + r_ht,
+                              text="DET 2", color='pink',
+                              bgcolor='black', bgalpha=1.0,
                               rot_deg=rot_deg)
             objs.extend([d2, t2])
-        lc = self.dc.Line(xc - r_wd, yc, xc + r_wd, yc,
+        lc = self.dc.Line(xc_det - r_wd, yc_det, xc_det + r_wd, yc_det,
                           linewidth=1, linestyle='dash', color='cyan')
         objs.append(lc)
         fov = self.dc.CompoundObject(*objs)
