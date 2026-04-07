@@ -150,6 +150,10 @@ from naoj.moircs import mdp
 # default center pixel (in FITS (1-based) indexing)
 default_x_ctr, default_y_ctr = (1084, 1786)
 
+# check whether pixel scale falls into this range
+min_px_scale = 0.11685
+max_px_scale = 0.11715
+
 
 class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def __init__(self, fv, fitsimage):
@@ -202,7 +206,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         # unit of angstroms
         self.valid_intervals = ['None', '100', '250', '500', '1000']
         self.fov_center = (default_x_ctr, default_y_ctr)
-        self.det_fov = [4.0, 4.0]  # detector dimensions in arcminute
+        self.det_fov = [3.97, 4.0]  # detector dimensions in arcminute
         self.gui_up = False
 
     def build_gui(self, container):
@@ -656,15 +660,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         ext = ext.lower()
 
         if ext == '.fits':
-            self.load_fits(filepath)
+            self.fv.error_wrap(self.load_fits, filepath)
 
         elif ext == '.mdp':
             self.w.filepath.set_text(filepath)
-            self.load_mdp(filepath)
+            self.fv.error_wrap(self.load_mdp, filepath)
 
         elif ext == '.ecsv':
             self.w.filepath.set_text(filepath)
-            self.load_ecsv(filepath)
+            self.fv.error_wrap(self.load_ecsv, filepath)
 
         else:
             self.message_box('error', "Error",
@@ -1445,6 +1449,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self._save_fext = fext
         self.w.save_file.clear_filters()
         self.w.save_file.add_ext_filter(f"{fext} files", fext)
+        self.w.save_file.set_mode('save')
         self.w.save_file.popup()
 
     def save_file_cb(self, w, paths):
@@ -1585,6 +1590,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         else:
             self.message_box('info', "Status", f"Wrote ECSV file: {path}")
 
+    def check_pixel_scale(self):
+        if not (min_px_scale <= self.pixel_scale <= max_px_scale):
+            self.message_box('warning', "Warning",
+                             f"Pixel scale of '{self.pixel_scale:.4f}' "
+                             "is outside the recommended range of"
+                             f"{min_px_scale:.4f} to {max_px_scale:.4f}")
+
     def message_box(self, category, title, message, parent=None):
         warn = Widgets.MessageDialog(title=title, modal=False,
                                      parent=self.fv.w.root,
@@ -1653,6 +1665,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 # convert to arcsec/px
                 self.pixel_scale = np.max([np.fabs(cdelt1),
                                            np.fabs(cdelt2)]) * 3600.0
+                self.check_pixel_scale()
 
                 self.image_pa_deg = xrot_deg
 

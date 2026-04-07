@@ -153,7 +153,9 @@ def table2sbr(table, fov_ctr_px, px_scale):
     Returns a buffer and a list of warnings.
     """
     # offset = np.deg2rad(mos_rot_deg)
+    # TODO: 0.1038 MIGHT BE FOCAS PX SCALE -- check output
     conversion = 0.015 / beta / 0.1038 * px_scale
+    #conversion = 0.015 / beta / px_scale
     fov_x_ctr, fov_y_ctr = fov_ctr_px
 
     warnings = []
@@ -161,7 +163,7 @@ def table2sbr(table, fov_ctr_px, px_scale):
     for i, shape in enumerate(table):
         x = shape['x']
         y = shape['y']
-        sl_l = shape['slit_width'] * 0.5
+        sl_l = shape['slit_length'] * 0.5
         x1_off = x - sl_l - fov_x_ctr
         x2_off = x + sl_l - fov_x_ctr
         y1_off = y - fov_y_ctr
@@ -197,7 +199,7 @@ def table2sbr(table, fov_ctr_px, px_scale):
             warnings.append(f"Slit {i} is out of MOIRCS FOV.")
 
         if shape['type'] == 'slit':
-            width = (shape['slit_length'] * px_scale / 2.06218 * sbr_fudge) * 1.08826 - 0.126902
+            width = (shape['slit_width'] * px_scale / 2.06218 * sbr_fudge) * 1.08826 - 0.126902
             lines.append(f"B,{x1_laser:9.4f},{y1_laser:9.4f},{x2_laser:9.4f},{y2_laser:9.4f},{width:9.4f}")
         else:
             radius = shape['slit_width'] / 2 * 0.015 / beta / 0.1038 * px_scale
