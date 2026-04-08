@@ -175,7 +175,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.show_excluded = False
         self.iqcalc = iqcalc.IQCalc(logger=self.logger)
         self._save_fext = ''
-        self.param_fields = ["directwave", "wavestart", "waveend",
+        self.param_fields = ["directwave1", "directwave2",
+                             "wavestart", "waveend",
                              "dispersion1", "dispersion2",
                              "dx1", "dx2", "tilt1", "tilt2"]
 
@@ -456,7 +457,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         vbox_controls.add_widget(hbox_grism, stretch=0)
 
         # Float parameter input using TextEntries
-        labels = {"directwave": "Direct Wave (\u212B):",
+        labels = {"directwave1": "Direct Wave DET 1 (\u212B):",
+                  "directwave2": "Direct Wave DET 2 (\u212B):",
                   "wavestart": "Wave Start (\u212B):",
                   "waveend": "Wave End (\u212B):",
                   "dispersion1": "Dispersion DET 1 (\u212B/px):",
@@ -1356,7 +1358,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         rot_deg = - self.pa_deg
         y_center = fov_center_g[1]
-        direct_wave = g.get('directwave', 0)
+        direct_wave1 = g.get('directwave1', 0)
+        direct_wave2 = g.get('directwave2', 0)
         wave_start = g.get('wavestart', 0)
         wave_end = g.get('waveend', 0)
         dispersion1 = g.get('dispersion1', 1)
@@ -1425,8 +1428,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
             if is_det1:
                 # Detector 1
-                bottom_length = (wave_start - direct_wave) / dispersion1
-                top_length = (direct_wave - wave_end) / dispersion1
+                bottom_length = (wave_start - direct_wave1) / dispersion1
+                top_length = (direct_wave1 - wave_end) / dispersion1
                 spec_y1 = ycen + top_length
                 spec_y2 = ycen - bottom_length
                 if dash_interval is not None:
@@ -1435,8 +1438,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 tilt_deg = tilt1
             else:
                 # Detector 2
-                bottom_length = (wave_start - direct_wave) / dispersion2
-                top_length = (direct_wave - wave_end) / dispersion2
+                bottom_length = (wave_start - direct_wave2) / dispersion2
+                top_length = (direct_wave2 - wave_end) / dispersion2
                 spec_y1 = ycen - top_length
                 spec_y2 = ycen + bottom_length
                 if dash_interval is not None:
