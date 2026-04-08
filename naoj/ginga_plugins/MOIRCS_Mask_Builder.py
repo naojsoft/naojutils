@@ -618,15 +618,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         return 0.0
 
     def set_fov_center_from_user_input(self, widget):
-        x = int(self.w.fov_center_x.get_value())
-        y = int(self.w.fov_center_y.get_value())
+        x = float(self.w.fov_center_x.get_value())
+        y = float(self.w.fov_center_y.get_value())
         self.fov_center = (x, y)
         # NOTE: account for FITS indexing vs. canvas indexing
         self.fitsimage.set_pan(x - 1, y - 1)
         self.update_fov()
 
     def set_fov_center(self, x, y):
-        x, y = int(x), int(y)
+        x, y = float(x), float(y)
         self.fov_center = (x, y)
         self.w.fov_center_x.set_value(x)
         self.w.fov_center_y.set_value(y)
@@ -636,7 +636,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         image = self.fitsimage.get_image()
         if image is not None:
             width, height = image.get_size()
-            x, y = int(width * 0.5), int(height * 0.5)
+            x, y = float(width * 0.5), float(height * 0.5)
             # NOTE: account for FITS indexing vs. canvas indexing
             self.set_fov_center(x + 1, y + 1)
 
@@ -759,7 +759,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         for i, hdr in enumerate(["Included", "X", "Y", "Comment", "Priority"]):
             gbox.add_widget(Widgets.Label(hdr), 0, i)
 
-        for i, shape in enumerate(self.shapes, 1):
+        for i, shape in enumerate(self.shapes, 0):
             shape_type = 'Slit' if shape['type'] == 'slit' else 'Hole'
             comment = shape.get('comment', '')
             cb = Widgets.CheckBox(f"{shape_type} #{i}")
@@ -1452,7 +1452,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             # TODO: rotate points according to tilt?
             poly = self.dc.Polygon(points, color=color,
                                    linewidth=1, fill=True,
-                                   fillcolor=color, fillalpha=0.3,
+                                   fillcolor=color, fillalpha=0.15,
                                    coord='data')
             poly.crdmap = self.fitsimage.get_coordmap('data')
             poly.rotate_deg([tilt_deg], (xcen, ycen))

@@ -75,15 +75,16 @@ def mdp2buf(rows):
     for shape in rows:
         x = shape['x']
         y = shape['y']
+        p = shape.get('priority', 1)
         comment = shape.get('comment', '')
         if shape['type'] == 'slit':
             l = shape['length']
             w = shape['width']
             a = shape['angle']
-            line = f"{x:.2f} {y:.2f} {l:.0f} {w:.0f} {a:.0f} 1 B, {comment}\n"
+            line = f"{x:.3f} {y:.3f} {l:.2f} {w:.2f} {a:.2f} {p:.2f} B, {comment}"
         else:
             d = shape['diameter']
-            line = f"{x:.2f} {y:.2f} {d:.0f} {d:.0f} 0 0 C, {comment}\n"
+            line = f"{x:.3f} {y:.3f} {d:.2f} {d:.2f} 0.00 {p:.2f} C, {comment}"
 
         #if shape.get('_deleted') or shape.get('excluded'):
         if shape.get('excluded'):
@@ -129,13 +130,13 @@ def table2mdp(table):
         p = row.get('priority', 1)
         comment = row.get('comment', '')
         if row['type'] == 'slit':
-            w = row['slit_width']
             l = row['slit_length']
+            w = row['slit_width']
             a = row['angle']
-            line = f"{x:.2f} {y:.2f} {w:.2f} {l:.2f} {a:.2f} {p:.2f} B, {comment}"
+            line = f"{x:.3f} {y:.3f} {l:.2f} {w:.2f} {a:.2f} {p:.2f} B, {comment}"
         else:
             d = row['slit_width']
-            line = f"{x:.2f} {y:.2f} {d:.2f} {d:.2f} 0 {p:.2f} C, {comment}"
+            line = f"{x:.3f} {y:.3f} {d:.2f} {d:.2f} 0.00 {p:.2f} C, {comment}"
 
         if row['excluded']:
             lines.append(f"# {line}")
