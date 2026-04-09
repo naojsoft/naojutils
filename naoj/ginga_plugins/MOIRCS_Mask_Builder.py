@@ -768,13 +768,13 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             gbox.add_widget(cb, i, 0)
             # Checked = included; Unchecked = excluded
             cb.set_state(not shape.get('excluded', False))
-            cb.add_callback('activated', self.slit_manager_cb, i - 1)
+            cb.add_callback('activated', self.slit_manager_cb, i)
             gbox.add_widget(Widgets.Label(f"{shape['x']:.1f}"), i, 1)
             gbox.add_widget(Widgets.Label(f"{shape['y']:.1f}"), i, 2)
             gbox.add_widget(Widgets.Label(f"{comment}"), i, 3)
             gbox.add_widget(Widgets.Label(f"{shape['priority']:.2f}"), i, 4)
             btn = Widgets.Button("Delete")
-            btn.add_callback('activated', self.delete_slit_cb, i - 1)
+            btn.add_callback('activated', self.delete_slit_cb, i)
             gbox.add_widget(btn, i, 5)
 
     def show_slit_and_hole_info(self):
