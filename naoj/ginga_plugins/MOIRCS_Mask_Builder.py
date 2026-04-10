@@ -162,6 +162,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         prefs = self.fv.get_preferences()
         self.settings = prefs.create_category('plugin_MOIRCS_Mask_Builder')
         self.settings.add_defaults(display_slitID=True, grism='zJ500',
+                                   prefer_sexigesimal=False,
                                    default_pixscale_arcsec=0.117)
         self.settings.load(onError='silent')
 
@@ -883,13 +884,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         # Ginga coordinate conversion is 0-based
         ra_deg, dec_deg = image.pixtoradec(data_x, data_y)
-        ra_str = wcs.ra_deg_to_str(ra_deg)
-        dec_str = wcs.dec_deg_to_str(dec_deg)
         # TODO: provide an option to display in degrees?
-        # dialog.ra.set_text(f"{ra_deg:.3f}")
-        # dialog.dec.set_text(f"{dec_deg:.3f}")
-        dialog.ra.set_text(ra_str)
-        dialog.dec.set_text(dec_str)
+        if self.settings.get('prefer_sexigesimal', False):
+            ra_str = wcs.ra_deg_to_str(ra_deg)
+            dialog.ra.set_text(ra_str)
+            dec_str = wcs.dec_deg_to_str(dec_deg)
+            dialog.dec.set_text(dec_str)
+        else:
+            dialog.ra.set_text(f"{ra_deg:.5f}")
+            dialog.dec.set_text(f"{dec_deg:.5f}")
 
         self._mark_xy(data_x, data_y)
 
