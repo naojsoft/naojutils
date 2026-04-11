@@ -293,26 +293,33 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         fov_controls.add_widget(hbox_fov, stretch=0)
 
-        hbox_center = Widgets.HBox()
-        hbox_center.set_spacing(4)
-        hbox_center.add_widget(Widgets.Label("FOV Center X:", halign='right'),
-                               stretch=0)
+        gbox_center = Widgets.GridBox(rows=2, columns=5)
+        gbox_center.add_widget(Widgets.Label("FOV Center X:", halign='right'),
+                               0, 0)
         self.w.fov_center_x = Widgets.SpinBox(dtype=float)
         self.w.fov_center_x.set_limits(0, 10000, 0.1)
         self.w.fov_center_x.set_value(self.fov_center[0])
-        hbox_center.add_widget(self.w.fov_center_x, stretch=0)
+        gbox_center.add_widget(self.w.fov_center_x, 0, 1)
 
-        hbox_center.add_widget(Widgets.Label("Y:", halign='right'), stretch=0)
+        gbox_center.add_widget(Widgets.Label("Y:", halign='right'), 0, 2)
         self.w.fov_center_y = Widgets.SpinBox(dtype=float)
         self.w.fov_center_y.set_limits(0, 10000, 0.1)
         self.w.fov_center_y.set_value(self.fov_center[1])
-        hbox_center.add_widget(self.w.fov_center_y, stretch=0)
+        gbox_center.add_widget(self.w.fov_center_y, 0, 3)
+
+        gbox_center.add_widget(Widgets.Label("FOV Center RA:", halign='right'),
+                               1, 0)
+        self.w.fov_center_ra = Widgets.TextEntry(editable=False)
+        gbox_center.add_widget(self.w.fov_center_ra, 1, 1)
+        gbox_center.add_widget(Widgets.Label("DEC:", halign='right'), 1, 2)
+        self.w.fov_center_dec = Widgets.TextEntry(editable=False)
+        gbox_center.add_widget(self.w.fov_center_dec, 1, 3)
 
         # Update button
         btn_update = Widgets.Button("Update")
         btn_update.add_callback('activated', self.set_fov_center_from_user_input)
-        hbox_center.add_widget(btn_update, stretch=0)
-        fov_controls.add_widget(hbox_center, stretch=0)
+        gbox_center.add_widget(btn_update, 0, 4)
+        fov_controls.add_widget(gbox_center, stretch=0)
 
         hbox = Widgets.HBox()
         hbox.add_widget(Widgets.Label("MOIRCS PA:", halign='right'), stretch=0)
@@ -623,25 +630,35 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def set_fov_center_from_user_input(self, widget):
         x = float(self.w.fov_center_x.get_value())
         y = float(self.w.fov_center_y.get_value())
-        self.fov_center = (x, y)
-        # NOTE: account for FITS indexing vs. canvas indexing
-        self.fitsimage.set_pan(x - 1, y - 1)
-        self.update_fov()
+        self._set_fov_center(x, y)
 
     def set_fov_center(self, x, y):
         x, y = float(x), float(y)
-        self.fov_center = (x, y)
         self.w.fov_center_x.set_value(x)
         self.w.fov_center_y.set_value(y)
+        self._set_fov_center(x, y)
+
+    def _set_fov_center(self, x, y):
+        self.fov_center = (x, y)
+        # NOTE: account for FITS indexing vs. canvas indexing
+        data_x, data_y = x - 1, y - 1
+        image = self.fitsimage.get_image()
+        if image is not None:
+            ra_deg, dec_deg = image.pixtoradec(data_x, data_y)
+            ra_str = wcs.ra_deg_to_str(ra_deg).replace(':', '')
+            dec_str = wcs.dec_deg_to_str(dec_deg).replace(':', '')
+            self.w.fov_center_ra.set_text(ra_str)
+            self.w.fov_center_dec.set_text(dec_str)
+        self.fitsimage.set_pan(data_x, data_y)
         self.update_fov()
 
     def set_fov_center_from_image(self):
         image = self.fitsimage.get_image()
         if image is not None:
             width, height = image.get_size()
-            x, y = float(width * 0.5), float(height * 0.5)
+            data_x, data_y = float(width * 0.5), float(height * 0.5)
             # NOTE: account for FITS indexing vs. canvas indexing
-            self.set_fov_center(x + 1, y + 1)
+            self.set_fov_center(data_x + 1, data_y + 1)
 
     def update_fov(self):
         self.draw_fov()
