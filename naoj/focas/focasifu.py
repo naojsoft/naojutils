@@ -86,7 +86,7 @@ def datafiltering(data, weight):
 
 def put_version(hdl):
     global ifu_soft_key
-    if not ifu_soft_key in list(hdl[0].header):
+    if ifu_soft_key not in list(hdl[0].header):
         hdl[0].header[ifu_soft_key] = (version, 'IFU pipline version')
     elif hdl[0].header[ifu_soft_key] != version:
         print(('Bias subtraction seems to be already applied '+\
@@ -192,6 +192,6 @@ def gaussfit1d(y):
     plt.draw()
     try:
         plt.pause(-1)
-    except:
+    except Exception:
         pass
     return g

@@ -6,7 +6,7 @@
 # 'focasifu' module is no longer imported.
 
 
-import sys, os
+import os
 import re
 import numpy as np
 from astropy.io import fits

@@ -509,6 +509,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         fr_controls.set_widget(vbox_controls)
         vbox.add_widget(fr_controls, stretch=0)
+        vbox.add_widget(Widgets.Label(''), stretch=1)
 
         # Add Slit or Hole dialog
         dialog = Widgets.Dialog(title="Add Slit or Hole",
@@ -1526,7 +1527,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             fext = self._save_fext
             if fext == '':
                 self.message_box('error', "Error",
-                                 f"Please specify an extension on the file (.mdp, .ecsv, .sbr)")
+                                 "Please specify an extension on the file (.mdp, .ecsv, .sbr)")
                 return
             else:
                 path = path + fext

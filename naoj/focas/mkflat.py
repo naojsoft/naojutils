@@ -5,8 +5,6 @@
 #   function in 'reconstruct_image.py'
 #
 
-import numpy as np
-from astropy.io import fits
 
 from . import biassub as bs
 from .reconstruct_image import integrate

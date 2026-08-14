@@ -313,17 +313,17 @@ def bias_overscan(ifname, rawdatadir='', template_pfx='bias_template',
 
     hdl = fits.open(rawdatadir+ifname)
     hdl, stat = bias_subtraction(hdl, template_pfx)
-    if stat == False:
+    if not stat:
         hdl.close()
         return ovname, False
 
     hdl, stat = remove_overscan(hdl)
-    if stat == False:
+    if not stat:
         hdl.close()
         return ovname, False
 
     hdl_right, stat = restore_badpix(hdl)
-    if stat == False:
+    if not stat:
         hdl.close()
         return ovname, False
 
@@ -334,17 +334,17 @@ def bias_overscan(ifname, rawdatadir='', template_pfx='bias_template',
     hdl = fi.put_version(hdl)
 
     hdl, stat = bias_subtraction(hdl, template_pfx)
-    if stat == False:
+    if not stat:
         hdl.close()
         return ovname, False
 
     hdl, stat = remove_overscan(hdl)
-    if stat == False:
+    if not stat:
         hdl.close()
         return ovname, False
 
     hdl_left, stat = restore_badpix(hdl)
-    if stat == False:
+    if not stat:
         hdl.close()
         return ovname, False
 

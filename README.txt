@@ -12,30 +12,23 @@ file LICENSE.txt in the top-level directory for details.
 
 BUILDING AND INSTALLATION
 -------------------------
-naojutils uses a standard distutils based install, e.g.
+naojutils is a standard pyproject.toml (PEP 621) package, so it installs
+with pip:
 
-    $ python setup.py build
+    $ pip install .
 
-or
+For a development install, where edits take effect without reinstalling:
 
-    $ python setup.py install
+    $ pip install -e .
 
-If you want to install to a specific area, do
+To install somewhere specific:
 
-    $ python setup.py install --prefix=/some/path
+    $ pip install --prefix=/some/path .
 
-The files will then end up under /some/path
+To build a wheel and an sdist without installing:
 
-NOTE: If you want to install the optional Ginga plugins, you must also
-repeat the "setup.py" operation in the "ginga_plugins" directory, e.g.:
+    $ python -m build
 
-    $ cd ginga_plugins
-    $ python setup.py build
-
-or
-
-    $ cd ginga_plugins
-    $ python setup.py install
-
-The above steps are not necessary if you don't plan to use those
-plugins.
+The Ginga plugins ship with the package -- they are registered through
+the "ginga.rv.plugins" entry point, so Ginga finds them once naojutils
+is installed, with nothing further to build.

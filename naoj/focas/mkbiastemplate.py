@@ -1,7 +1,10 @@
+import argparse
+import os
+
 import numpy as np
 from scipy.stats import sigmaclip
 from astropy.io import fits
-import os
+
 from . import focasifu as fi
 
 def MkBiasTemplate(filename, nsigma=4.0, rawdatadir='', overwrite=False,

@@ -4,7 +4,6 @@
 USAGE: focas_ifu_mkflat -o output.fits chip1.fits chip2.fits
 
 """
-import sys
 import argparse
 
 from naoj.focas.mkflat import mkflat

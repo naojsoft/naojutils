@@ -1,4 +1,3 @@
-import sys
 import numpy as np
 from astropy.io import fits
 from .bias_overscan import bias_subtraction, remove_overscan

@@ -11,7 +11,7 @@ USAGE: focas_ifu_reconstruct_image right.fits left.fits -o output.fits [options]
 import sys
 import argparse
 
-from naoj.focas.reconstruct_image import reconstruct_image, version
+from naoj.focas.reconstruct_image import reconstruct_image
 
 
 def main(options, args):

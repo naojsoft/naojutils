@@ -7,7 +7,8 @@
 # Please see the file LICENSE.txt for details.
 #
 import os
-import re, glob
+import re
+import glob
 import time
 
 # 3rd party imports
@@ -16,7 +17,7 @@ import numpy
 from ginga import AstroImage
 from ginga.misc import Bunch, log
 from ginga.util import dp
-from ginga.util import mosaic, wcs
+from ginga.util import wcs
 
 from g2base.astro.frame import Frame
 
