@@ -8,25 +8,52 @@ beta = 0.29898169
 sbr_fudge = 1.006
 
 
+def shape_type(value):
+    """Normalise however a file spells a shape's type.
+
+    MDP writes the single letters ``B`` (box, i.e. a slit) and ``C``
+    (circle, i.e. a hole), sometimes with the field's trailing comma
+    still attached; ECSV files written by the plugin spell them out.
+    """
+    text = str(value).strip().strip(',').lower()
+    if text.startswith('c') or text == 'hole':
+        return 'hole'
+    return 'slit'
+
+
 def load_ecsv(path):
     """Read an ECSV file into rows that can be used by the
     MOIRCS_Mask_Builder plugin.
     """
-    tbl = Table.read(path, format='ascii.ecsv', delimiter=',',
-                     comment=r'\s*#', quotechar='"',
-                     header_start=0)
+    # NOTE: an ECSV file declares its own delimiter in its header --
+    # forcing one here rejects any file that uses a different one.  The
+    # format's default is a space, while this plugin writes commas, so
+    # forcing commas made every space-delimited file unreadable.
+    tbl = Table.read(path, format='ascii.ecsv')
     rows = []
     for row in tbl:
         row_dict = dict(row)
+
+        # older files name the column 'otype' and carry MDP's B/C
+        # letters rather than 'slit'/'hole'
+        otype = row_dict.pop('type', None)
+        if otype is None:
+            otype = row_dict.pop('otype', 'slit')
+        else:
+            row_dict.pop('otype', None)
+        row_dict['type'] = shape_type(otype)
+
+        # ...and may have no 'excluded' column at all
+        row_dict['excluded'] = bool(row_dict.get('excluded', False))
+        row_dict['comment'] = str(row_dict.get('comment', ''))
+
         if row_dict['type'] == 'hole':
             row_dict['diameter'] = row_dict.pop('slit_width')
-            row_dict.pop('slit_length')
-            row_dict.pop('angle')
+            row_dict.pop('slit_length', None)
+            row_dict.pop('angle', None)
         else:
             row_dict['width'] = row_dict.pop('slit_width')
             row_dict['length'] = row_dict.pop('slit_length')
-
-        #row_dict['_excluded'] = row_dict.pop('excluded')
 
         rows.append(row_dict)
 
@@ -48,7 +75,7 @@ def load_mdp(path):
                 continue
             otype = parts[6].strip()
             row_dict = {
-                'type': 'hole' if otype.startswith('C') else 'slit',
+                'type': shape_type(otype),
                 'x': float(parts[0]),
                 'y': float(parts[1]),
                 'length': float(parts[2]),

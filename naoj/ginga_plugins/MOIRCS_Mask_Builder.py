@@ -154,6 +154,15 @@ default_x_ctr, default_y_ctr = (1084, 1786)
 min_px_scale = 0.11685
 max_px_scale = 0.11715
 
+# smallest slit a mask can be cut with, in pixels -- at the nominal
+# 0.117 arcsec/px that is 0.35 x 4.1 arcsec
+min_slit_width_px = 3.0
+min_slit_length_px = 35.0
+
+# excluded shapes are drawn in this colour, on the canvas and in the
+# manager table alike
+excluded_color = 'purple'
+
 
 class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def __init__(self, fv, fitsimage):
@@ -172,6 +181,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
         self.shapes = []  # Unified list for slits and holes
         self._undo_stack = []
+        # shapes currently offered by the edit dialog's chooser, in the
+        # order they appear there
+        self._edit_shapes = []
+        self._edit_widgets = {}
+        self._updating_edit_list = False
         self._updating_grism_params = False
         self.show_excluded = False
         self.iqcalc = iqcalc.IQCalc(logger=self.logger)
@@ -254,6 +268,20 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         w = filemenu.add_name("New")
         w.set_tooltip("Clear everything and start a new mask")
         w.add_callback('activated', lambda w: self.new_mask())
+
+        optionsmenu = self.w.toolbar.add_menu("Options...", mtype='menu')
+
+        w = optionsmenu.add_name("Sexigesimal RA/DEC", checkable=True)
+        w.set_state(self.settings.get('prefer_sexigesimal', False))
+        w.set_tooltip("Show RA/DEC in sexigesimal form, otherwise degrees")
+        w.add_callback('activated', self.prefer_sexigesimal_cb)
+        self.w.prefer_sexigesimal = w
+
+        optionsmenu.add_separator()
+
+        w = optionsmenu.add_name("Save options")
+        w.set_tooltip("Save these options, so they are used next time")
+        w.add_callback('activated', lambda w: self.save_options())
 
         vbox.add_widget(self.w.toolbar, stretch=0)
 
@@ -560,13 +588,46 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                                 parent=self.fv.w.root)
         content = dialog.get_content_area()
         content.set_border_width(4)
-        scroll = Widgets.ScrollArea()
-        gbox = Widgets.GridBox(columns=6)
-        scroll.set_widget(gbox)
-        content.add_widget(scroll, stretch=1)
-        self.w.slits_gbox = gbox
+        # NOTE: not sortable on purpose -- shapes are numbered by their
+        # position in the list, and a cell callback reports the row by
+        # position, so a re-ordered view would report the wrong shape
+        tbl = Widgets.TableView(selection_mode='single', sortable=False,
+                                show_row_numbers=False)
+        tbl.set_columns([
+            dict(label='Included', key='included', widget='checkbox'),
+            dict(label='ID', key='id'),
+            dict(label='X', key='x'),
+            dict(label='Y', key='y'),
+            dict(label='Priority', key='priority'),
+            dict(label='Comment', key='comment'),
+            dict(label='', key='delete', widget='button', text="Delete"),
+        ])
+        tbl.add_callback('cell_edited', self.slit_table_edited_cb)
+        tbl.add_callback('cell_action', self.slit_table_action_cb)
+        content.add_widget(tbl, stretch=1)
+        self.w.slits_tbl = tbl
         self.w.slits_dialog = dialog
         dialog.add_callback('activated', lambda w, val: w.hide())
+
+        # Edit Slit or Hole dialog.  Built once: rebuilding it per edit
+        # left a stale copy of the list behind every time a shape was
+        # excluded or deleted elsewhere.
+        dialog = Widgets.Dialog(title="Edit Slit or Hole",
+                                buttons=[("Apply", 0), ("Close", 1)],
+                                parent=self.fv.w.root)
+        layout = dialog.get_content_area()
+        layout.set_border_width(4)
+        layout.add_widget(Widgets.Label("Select ID to edit:"), stretch=0)
+        combo = Widgets.ComboBox()
+        combo.add_callback('activated', lambda w, idx: self._edit_select(idx))
+        layout.add_widget(combo, stretch=0)
+        fields = Widgets.VBox()
+        fields.set_spacing(2)
+        layout.add_widget(fields, stretch=1)
+        dialog.add_callback('activated', self.edit_apply_cb)
+        self.w.edit_combo = combo
+        self.w.edit_fields = fields
+        self.w.edit_slit_dialog = dialog
 
         # Confirm Center dialog
         dialog = Widgets.Dialog(title="Confirm Center Pixel",
@@ -581,9 +642,15 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.w.fbrowser = Widgets.FileDialog(title="Select file",
                                              parent=self.fv.w.root)
         self.w.fbrowser.set_mode('file')
+        # NOTE: add_ext_filter() groups by category, so listing all three
+        # under one name gives a single filter that shows them together;
+        # the individual ones after it are there to narrow the view.  Qt
+        # selects the first, so the combined one is the default.
+        for ext in ['.fits', '.mdp', '.ecsv']:
+            self.w.fbrowser.add_ext_filter("mask files", ext)
         self.w.fbrowser.add_ext_filter(".fits files", '.fits')
         self.w.fbrowser.add_ext_filter(".mdp files", '.mdp')
-        self.w.fbrowser.add_ext_filter(".escv files", '.ecsv')
+        self.w.fbrowser.add_ext_filter(".ecsv files", '.ecsv')
         self.w.fbrowser.add_callback('activated', self.browse_file_cb)
 
         # Save file dialog
@@ -643,15 +710,60 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.fov_center = (x, y)
         # NOTE: account for FITS indexing vs. canvas indexing
         data_x, data_y = x - 1, y - 1
-        image = self.fitsimage.get_image()
-        if image is not None:
-            ra_deg, dec_deg = image.pixtoradec(data_x, data_y)
-            ra_str = wcs.ra_deg_to_str(ra_deg).replace(':', '')
-            dec_str = wcs.dec_deg_to_str(dec_deg).replace(':', '')
-            self.w.fov_center_ra.set_text(ra_str)
-            self.w.fov_center_dec.set_text(dec_str)
+        self.update_fov_center_radec()
         self.fitsimage.set_pan(data_x, data_y)
         self.update_fov()
+
+    def update_fov_center_radec(self):
+        """Show the FOV center RA/DEC in the form the user has chosen.
+
+        Kept apart from _set_fov_center() so that switching the format can
+        redraw the two boxes without also re-panning the viewer.
+        """
+        if not self.gui_up:
+            return
+        image = self.fitsimage.get_image()
+        if image is None:
+            self.w.fov_center_ra.set_text('')
+            self.w.fov_center_dec.set_text('')
+            return
+
+        x, y = self.fov_center
+        # NOTE: account for FITS indexing vs. canvas indexing
+        ra_deg, dec_deg = image.pixtoradec(x - 1, y - 1)
+        if self.settings.get('prefer_sexigesimal', False):
+            ra_txt = wcs.ra_deg_to_str(ra_deg).replace(':', '')
+            dec_txt = wcs.dec_deg_to_str(dec_deg).replace(':', '')
+        else:
+            ra_txt = f"{ra_deg:.5f}"
+            dec_txt = f"{dec_deg:.5f}"
+        self.w.fov_center_ra.set_text(ra_txt)
+        self.w.fov_center_dec.set_text(dec_txt)
+
+    def prefer_sexigesimal_cb(self, w, tf):
+        self.settings.set(prefer_sexigesimal=tf)
+        self.update_fov_center_radec()
+        return True
+
+    def save_options(self):
+        """Write the plugin settings out, so they persist to the next session.
+
+        NOTE: SettingGroup.save() logs a write failure rather than raising,
+        so check that the file actually appeared instead of reporting
+        success on its say-so.
+        """
+        path = getattr(self.settings, 'preffile', None)
+        try:
+            self.settings.save()
+        except Exception as e:
+            self.logger.error("failed to save settings: %s" % (str(e)),
+                              exc_info=True)
+        if path is not None and os.path.exists(path):
+            self.message_box('info', "Saved", f"Options saved to\n{path}")
+        else:
+            self.message_box('error', "Error",
+                             "Could not save the options; "
+                             "see the log for details")
 
     def set_fov_center_from_image(self):
         image = self.fitsimage.get_image()
@@ -672,6 +784,14 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
     def update_slits_spectra(self):
         self.draw_slits()
         self.draw_spectra()
+
+    def shapes_changed(self):
+        """The shape list itself changed: redraw the canvas and refresh
+        the views onto it.  Both dialogs stay open across edits, so
+        neither can be left showing a shape that is gone or hiding one
+        that has just come back."""
+        self.update_slit_and_hole_info()
+        self.update_slits_spectra()
 
     def browse_file_cb(self, w, paths):
         if len(paths) > 0:
@@ -703,7 +823,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             self.message_box('error', "Error",
                              f"Don't know how to load a '{ext}' file")
 
-        self.update_slits_spectra()
+        self.shapes_changed()
 
     def reload(self):
         path = self.load_filename
@@ -719,7 +839,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.shapes = []
         self._undo_stack = []
 
-        self.update_slits_spectra()
+        self.shapes_changed()
 
     def load_fits(self, filepath):
         self.fv.load_file(filepath, chname=self.channel.name)
@@ -766,49 +886,97 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     grism_params[name] = tbl.meta[key]
             self.set_grism_params(grism_params)
 
-        # restore FOV center
-        fov_center_x = float(tbl.meta['fov_center_x'])
-        fov_center_y = float(tbl.meta['fov_center_y'])
-        self.set_fov_center(fov_center_x, fov_center_y)
+        # restore FOV center, if the file recorded one -- files written
+        # before the plugin saved metadata (or by other tools) have none,
+        # in which case the current centre stands
+        if 'fov_center_x' in tbl.meta and 'fov_center_y' in tbl.meta:
+            fov_center_x = float(tbl.meta['fov_center_x'])
+            fov_center_y = float(tbl.meta['fov_center_y'])
+            self.set_fov_center(fov_center_x, fov_center_y)
+
+    def _shape_label(self, i, shape):
+        kind = 'Slit' if shape['type'] == 'slit' else 'Hole'
+        return f"{kind} #{i}"
 
     def update_slit_and_hole_info(self):
-        gbox = self.w.slits_gbox
-        gbox.remove_all(delete=True)
+        """Refresh the manager table from the current shapes."""
+        if not self.gui_up:
+            return
+        tbl = self.w.slits_tbl
+        rows = []
+        for i, shape in enumerate(self.shapes):
+            rows.append(dict(included=not shape.get('excluded', False),
+                             id=self._shape_label(i, shape),
+                             x=f"{shape['x']:.1f}",
+                             y=f"{shape['y']:.1f}",
+                             priority=f"{shape.get('priority', 1):.2f}",
+                             comment=shape.get('comment', ''),
+                             delete=''))
+        tbl.set_rows(rows)
+        for i, shape in enumerate(self.shapes):
+            self._color_shape_row(i, shape)
 
-        # add header
-        # TODO: should we use a TreeView for this?
-        for i, hdr in enumerate(["Included", "X", "Y", "Comment", "Priority"]):
-            gbox.add_widget(Widgets.Label(hdr), 0, i)
+        # the edit dialog offers the same shapes, so it goes stale too
+        self._refresh_edit_list()
 
-        for i, shape in enumerate(self.shapes, 0):
-            shape_type = 'Slit' if shape['type'] == 'slit' else 'Hole'
-            comment = shape.get('comment', '')
-            cb = Widgets.CheckBox(f"{shape_type} #{i}")
-            gbox.add_widget(cb, i, 0)
-            # Checked = included; Unchecked = excluded
-            cb.set_state(not shape.get('excluded', False))
-            cb.add_callback('activated', self.slit_manager_cb, i)
-            gbox.add_widget(Widgets.Label(f"{shape['x']:.1f}"), i, 1)
-            gbox.add_widget(Widgets.Label(f"{shape['y']:.1f}"), i, 2)
-            gbox.add_widget(Widgets.Label(f"{comment}"), i, 3)
-            gbox.add_widget(Widgets.Label(f"{shape['priority']:.2f}"), i, 4)
-            btn = Widgets.Button("Delete")
-            btn.add_callback('activated', self.delete_slit_cb, i)
-            gbox.add_widget(btn, i, 5)
+    def _color_shape_row(self, i, shape):
+        """Excluded rows are drawn in the colour the canvas uses for
+        them, so the two views agree at a glance."""
+        tbl = self.w.slits_tbl
+        if shape.get('excluded', False):
+            tbl.set_row_color(i, fg=excluded_color)
+        else:
+            tbl.clear_row_color(i)
 
     def show_slit_and_hole_info(self):
         self.update_slit_and_hole_info()
         self.w.slits_dialog.show()
 
-    def slit_manager_cb(self, w, checked, i):
-        self.shapes[i]['excluded'] = not checked
+    def _row_index(self, path_or_row):
+        """The shape index behind a cell callback.
+
+        Backends differ: cell_edited reports a path, cell_action reports
+        the row dict on qt/pg and a path on the gtk backends.
+        """
+        if isinstance(path_or_row, dict):
+            # match on the label, which carries the index
+            label = path_or_row.get('id', '')
+            for i, shape in enumerate(self.shapes):
+                if self._shape_label(i, shape) == label:
+                    return i
+            return None
+        if isinstance(path_or_row, (list, tuple)):
+            return int(path_or_row[0]) if len(path_or_row) > 0 else None
+        return int(path_or_row)
+
+    def slit_table_edited_cb(self, tbl, path, col_key, old_val, new_val):
+        """The Included checkbox was toggled."""
+        if col_key != 'included':
+            return
+        i = self._row_index(path)
+        if i is None or not (0 <= i < len(self.shapes)):
+            return
+        shape = self.shapes[i]
+        shape['excluded'] = not bool(new_val)
+        # recolour in place rather than rebuilding the table: this is
+        # running inside the table's own callback
+        self._color_shape_row(i, shape)
+        self._refresh_edit_list()
         self.update_slits_spectra()
 
-    def delete_slit_cb(self, w, i):
+    def slit_table_action_cb(self, tbl, path_or_row, col_key):
+        """The Delete button in a row was clicked."""
+        if col_key != 'delete':
+            return
+        i = self._row_index(path_or_row)
+        if i is None or not (0 <= i < len(self.shapes)):
+            return
+        self.delete_shape(i)
+
+    def delete_shape(self, i):
         self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
         self.shapes.pop(i)
-        self.update_slit_and_hole_info()
-        self.update_slits_spectra()
+        self.shapes_changed()
 
     def toggle_show_excluded(self, val):
         self.show_excluded = val
@@ -863,8 +1031,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                     s2['excluded'] = True
                     excluded_count += 1
 
-        self.update_slit_and_hole_info()
-        self.update_slits_spectra()
+        self.shapes_changed()
         self.message_box('info', "Auto Exclusion", f"Excluded {excluded_count} shape(s).")
 
     def add_slit_or_hole(self):
@@ -1043,125 +1210,164 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             shape.update({'type': 'hole', 'diameter': self.default_diameter,
                           'priority': 1})
         self.shapes.append(shape)
-        self.update_slit_and_hole_info()
-        self.update_slits_spectra()
+        self.shapes_changed()
         return shape
+
+    def _refresh_edit_list(self, select_shape=None):
+        """Re-populate the edit dialog's chooser from the current shapes.
+
+        Called whenever the shapes change, so an open dialog never
+        offers a shape that has been deleted, nor hides one that has
+        just been re-included.
+        """
+        if not self.gui_up:
+            return
+        combo = self.w.edit_combo
+        if select_shape is None:
+            # keep whatever is selected now, if it still exists
+            idx = combo.get_index()
+            if 0 <= idx < len(self._edit_shapes):
+                select_shape = self._edit_shapes[idx]
+
+        self._edit_shapes = list(self.shapes)
+        self._updating_edit_list = True
+        try:
+            combo.clear()
+            for i, shape in enumerate(self.shapes):
+                prefix = 'B' if shape['type'] == 'slit' else 'C'
+                comment = shape.get('comment', '')
+                label = f"{prefix}{i}: {comment}"
+                if shape.get('excluded', False):
+                    label += "  (excluded)"
+                combo.append_text(label)
+
+            index = 0
+            if select_shape is not None and select_shape in self._edit_shapes:
+                index = self._edit_shapes.index(select_shape)
+            if len(self._edit_shapes) > 0:
+                combo.set_index(index)
+        finally:
+            self._updating_edit_list = False
+
+        self._populate_edit_fields()
+
+    def _edit_select(self, idx):
+        if self._updating_edit_list:
+            return
+        self._populate_edit_fields()
+
+    def _current_edit_shape(self):
+        idx = self.w.edit_combo.get_index()
+        if 0 <= idx < len(self._edit_shapes):
+            return self._edit_shapes[idx]
+        return None
+
+    def _populate_edit_fields(self):
+        """Lay out the fields for the shape now selected."""
+        if not self.gui_up:
+            return
+        fields = self.w.edit_fields
+        fields.remove_all(delete=True)
+        self._edit_widgets = {}
+
+        shape = self._current_edit_shape()
+        if shape is None:
+            fields.add_widget(Widgets.Label("No slits or holes to edit"),
+                              stretch=0)
+            return
+
+        def add_field(name, value):
+            fields.add_widget(Widgets.Label(name), stretch=0)
+            entry = Widgets.TextEntry()
+            entry.set_text(str(value))
+            fields.add_widget(entry, stretch=0)
+            self._edit_widgets[name] = entry
+
+        add_field("X:", shape.get('x', ''))
+        add_field("Y:", shape.get('y', ''))
+        if shape['type'] == 'slit':
+            add_field("Length:", shape.get('length', ''))
+            add_field("Width:", shape.get('width', ''))
+            add_field("Angle:", shape.get('angle', ''))
+        else:
+            add_field("Diameter:", shape.get('diameter', ''))
+        add_field("Priority:", shape.get('priority', ''))
+        add_field("Comment:", shape.get('comment', ''))
+        if shape.get('excluded', False):
+            fields.add_widget(Widgets.Label("NOTE: this shape is excluded"),
+                              stretch=0)
 
     def edit_slit_or_hole(self, edit_shape=None):
         if len(self.shapes) == 0:
             self.message_box('error', "Error", "No slits or holes to edit")
             return
 
-        dialog = Widgets.Dialog(title="Edit Slit or Hole",
-                                buttons=[("Apply", 0), ("Close", 1)])
-        layout = dialog.get_content_area()
-        layout.set_border_width(4)
-        layout.add_widget(Widgets.Label("Select ID to edit:"))
-        combo = Widgets.ComboBox()
-        id_map = {}
-        j = 0
-        edit_index = 0
-        for i, shape in enumerate(self.shapes):
-            if shape.get('excluded', False):
-                continue
-            if edit_shape is not None and edit_shape is shape:
-                edit_index = i
-            prefix = 'B' if shape['type'] == 'slit' else 'C'
-            label = f"{prefix}{i}: {shape.get('comment', '')}"
-            combo.append_text(label)
-            id_map[j] = shape
-            j += 1
-        layout.add_widget(combo, stretch=0)
-        fields_widget = Widgets.VBox()
-        layout.add_widget(fields_widget)
-        current_fields = {}
+        self._refresh_edit_list(select_shape=edit_shape)
+        self.w.edit_slit_dialog.show()
 
-        def clear_fields():
-            fields_widget.remove_all()
+    def edit_apply_cb(self, w, val):
+        dialog = self.w.edit_slit_dialog
+        if val == 1:
+            w.hide()
+            return
+        shape = self._current_edit_shape()
+        if shape is None:
+            return
+        current_fields = self._edit_widgets
+        try:
+            x = float(current_fields["X:"].get_text())
+            y = float(current_fields["Y:"].get_text())
 
-        def add_field(name, initial_value):
-            lbl = Widgets.Label(name)
-            le = Widgets.TextEntry()
-            le.set_text(str(initial_value))
-            fields_widget.add_widget(lbl, stretch=0)
-            fields_widget.add_widget(le, stretch=0)
-            current_fields[name] = le
-
-        def populate_fields(index):
-            clear_fields()
-            shape = id_map[index]
-            add_field("X:", shape.get('x', ''))
-            add_field("Y:", shape.get('y', ''))
-            if shape['type'] == 'slit':
-                add_field("Length:", shape.get('length', ''))
-                add_field("Width:", shape.get('width', ''))
-                add_field("Angle:", shape.get('angle', ''))
-            else:
-                add_field("Diameter:", shape.get('diameter', ''))
-            add_field("Priority:", shape.get('priority', ''))
-            add_field("Comment:", shape.get('comment', ''))
-
-        combo.add_callback('activated', lambda w, idx: populate_fields(idx))
-        combo.set_index(edit_index)
-        populate_fields(edit_index)
-
-        def apply_changes(w, val):
-            if val == 1:
-                w.hide()
+            if not self.is_within_fov_bounds(x, y) or not self.is_within_y_arcsec_limit(y):
+                self.message_box('warning', "Out of Bounds", "The specified position is outside the allowed FOV.", parent=dialog)
                 return
-            shape = id_map[combo.get_index()]
-            try:
-                x = float(current_fields["X:"].get_text())
-                y = float(current_fields["Y:"].get_text())
 
-                if not self.is_within_fov_bounds(x, y) or not self.is_within_y_arcsec_limit(y):
-                    self.message_box('warning', "Out of Bounds", "The specified position is outside the allowed FOV.", parent=dialog)
+            if shape['type'] == 'slit':
+                width = float(current_fields["Width:"].get_text().strip())
+                length = float(current_fields["Length:"].get_text().strip())
+                angle = float(current_fields["Angle:"].get_text().strip())
+                if length < min_slit_length_px:
+                    self.message_box('warning', "Invalid input",
+                                     f"Length must be at least {min_slit_length_px} px.",
+                                     parent=dialog)
                     return
+                if width < min_slit_width_px:
+                    self.message_box('warning', "Invalid input",
+                                     f"Width must be at least {min_slit_width_px} px.",
+                                     parent=dialog)
+                    return
+                # NOTE: for now, editing the width and length here
+                # sets the default width and length for future slits.
+                # Only once they have passed the checks above: set
+                # any earlier and a rejected value is still handed to
+                # every slit added afterwards.
+                self.default_width = width
+                self.default_length = length
+            else:
+                diameter = float(current_fields["Diameter:"].get_text().strip())
+                if diameter < 20 or diameter > 30:
+                    self.message_box('warning', "Invalid input", "Diameter must be between 20 and 30.", parent=dialog)
+                    return
+                # NOTE: for now, editing the diameter here
+                # sets the default diameter for future holes
+                self.default_diameter = diameter
 
-                if shape['type'] == 'slit':
-                    width = float(current_fields["Width:"].get_text().strip())
-                    length = float(current_fields["Length:"].get_text().strip())
-                    # NOTE: for now, editing the width and length here
-                    # sets the default width and length for future slits
-                    self.default_width = width
-                    self.default_length = length
-                    angle = float(current_fields["Angle:"].get_text().strip())
-                    if length < 35:
-                        self.message_box('warning', "Invalid input", "Length must be at least 35.",
-                                         parent=dialog)
-                        return
-                    if width < 6.8:
-                        self.message_box('warning', "Invalid input", "Width must be at least 6.8.", parent=dialog)
-                        return
-                else:
-                    diameter = float(current_fields["Diameter:"].get_text().strip())
-                    if diameter < 20 or diameter > 30:
-                        self.message_box('warning', "Invalid input", "Diameter must be between 20 and 30.", parent=dialog)
-                        return
-                    # NOTE: for now, editing the doiameter here
-                    # sets the default diameter for future holes
-                    self.default_diameter = diameter
+            self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
+            shape['x'] = x
+            shape['y'] = y
+            shape['priority'] = float(current_fields["Priority:"].get_text().strip())
+            shape['comment'] = current_fields["Comment:"].get_text().strip()
+            if shape['type'] == 'slit':
+                shape['width'] = width
+                shape['length'] = length
+                shape['angle'] = angle
+            else:
+                shape['diameter'] = diameter
 
-                self._undo_stack.append({'shapes': copy.deepcopy(self.shapes)})
-                shape['x'] = x
-                shape['y'] = y
-                shape['priority'] = float(current_fields["Priority:"].get_text().strip())
-                shape['comment'] = current_fields["Comment:"].get_text().strip()
-                if shape['type'] == 'slit':
-                    shape['width'] = width
-                    shape['length'] = length
-                    shape['angle'] = angle
-                else:
-                    shape['diameter'] = diameter
+            self.shapes_changed()
 
-                self.update_slits_spectra()
-
-            except ValueError:
-                self.message_box('warning', "Invalid input", "Please enter valid numeric values.", parent=dialog)
-
-        dialog.add_callback('activated', apply_changes)
-        self.w.edit_slit_dialog = dialog
-        dialog.show()
+        except ValueError:
+            self.message_box('warning', "Invalid input", "Please enter valid numeric values.", parent=dialog)
 
     def undo_last_edit(self):
         if not self._undo_stack:
@@ -1169,8 +1375,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             return
         last_state = self._undo_stack.pop()
         self.shapes = last_state['shapes']
-        self.update_slit_and_hole_info()
-        self.update_slits_spectra()
+        self.shapes_changed()
         self.logger.info("undo!")
 
     def on_grism_param_changed(self, key):
@@ -1653,8 +1858,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                              f"{min_px_scale:.4f} to {max_px_scale:.4f}")
 
     def message_box(self, category, title, message, parent=None):
+        if parent is None:
+            parent = self.fv.w.root
         warn = Widgets.MessageDialog(title=title, modal=False,
-                                     parent=self.fv.w.root,
+                                     parent=parent,
                                      buttons=[("Dismiss", 0)])
         warn.set_message(category, message, title=title)
         warn.add_callback('activated', lambda w, val: w.hide())
