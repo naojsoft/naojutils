@@ -47,6 +47,11 @@ def load_ecsv(path):
         row_dict['excluded'] = bool(row_dict.get('excluded', False))
         row_dict['comment'] = str(row_dict.get('comment', ''))
 
+        # a file written before ids, or by another tool, has none; the
+        # caller assigns those
+        if 'id' in row_dict:
+            row_dict['id'] = int(row_dict['id'])
+
         if row_dict['type'] == 'hole':
             row_dict['diameter'] = row_dict.pop('slit_width')
             row_dict.pop('slit_length', None)
@@ -140,10 +145,16 @@ def rows2table(rows):
     otype = np.array([dct['type'] for dct in rows])
     excluded = np.array([dct.get('excluded', False) for dct in rows])
     comment = np.array([dct['comment'] for dct in rows])
+    # NOTE: an identifier that stays with a shape however the list is
+    # reordered or trimmed.  It rides along in the ECSV, and the MDP and
+    # SBR writers below simply do not name this column, so neither of
+    # those formats changes.
+    ident = np.array([int(dct.get('id', i)) for i, dct in enumerate(rows)])
 
     # make a proper table with headers and columns
-    tbl = Table([x, y, length, width, ang, priority, otype, excluded, comment],
-            names=['x', 'y', 'slit_length', 'slit_width',
+    tbl = Table([ident, x, y, length, width, ang, priority, otype, excluded,
+                 comment],
+            names=['id', 'x', 'y', 'slit_length', 'slit_width',
                    'angle', 'priority', 'type', 'excluded', 'comment'])
 
     return tbl

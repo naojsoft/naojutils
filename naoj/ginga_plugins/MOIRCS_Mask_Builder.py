@@ -180,6 +180,11 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.grism_info = self.get_grism_info(self.grism_name)
 
         self.shapes = []  # Unified list for slits and holes
+        # Shapes carry an 'id' that stays with them however the list is
+        # reordered or trimmed, so that the canvas, the manager table and
+        # the edit dialog all name the same shape the same way.  Never
+        # reused within a session, so ids have gaps after deletions.
+        self._next_shape_id = 0
         self._undo_stack = []
         # shapes currently offered by the edit dialog's chooser, in the
         # order they appear there
@@ -740,9 +745,20 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.w.fov_center_ra.set_text(ra_txt)
         self.w.fov_center_dec.set_text(dec_txt)
 
-    def prefer_sexigesimal_cb(self, w, tf):
+    def set_prefer_sexigesimal(self, tf):
+        """Choose sexigesimal or degrees, and bring the menu item along.
+
+        Loading an ECSV can change this, so the menu item is set from here
+        rather than being the only thing that knows the current choice.
+        """
+        tf = bool(tf)
         self.settings.set(prefer_sexigesimal=tf)
-        self.update_fov_center_radec()
+        if self.gui_up:
+            self.w.prefer_sexigesimal.set_state(tf)
+            self.update_fov_center_radec()
+
+    def prefer_sexigesimal_cb(self, w, tf):
+        self.set_prefer_sexigesimal(tf)
         return True
 
     def save_options(self):
@@ -837,6 +853,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         self.load_filename = 'UNKNOWN_FILE'
         self.w.filepath.set_text('')
         self.shapes = []
+        self._next_shape_id = 0
         self._undo_stack = []
 
         self.shapes_changed()
@@ -846,12 +863,16 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
 
     def load_mdp(self, filepath):
         rows = mdp.load_mdp(filepath)
+        # the MDP format carries no ids, so every shape gets a fresh one
+        self.assign_shape_ids(rows)
         self.shapes = rows
         self._undo_stack = []
         self.load_filename = filepath
 
     def load_ecsv(self, filepath):
         rows, tbl = mdp.load_ecsv(filepath)
+        # keeps the ids the file carries, and fills in any it lacks
+        self.assign_shape_ids(rows)
         self.shapes = rows
         self._undo_stack = []
         self.load_filename = filepath
@@ -872,6 +893,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if 'pa_deg' in tbl.meta:
             self.pa_deg = float(tbl.meta['pa_deg'])
             self.w.pa_deg.set_value(self.pa_deg)
+
+        # restore how RA/DEC are shown, if possible
+        if 'prefer_sexigesimal' in tbl.meta:
+            self.set_prefer_sexigesimal(bool(tbl.meta['prefer_sexigesimal']))
 
         # restore grism if possible
         if 'grism' in tbl.meta:
@@ -894,9 +919,46 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             fov_center_y = float(tbl.meta['fov_center_y'])
             self.set_fov_center(fov_center_x, fov_center_y)
 
-    def _shape_label(self, i, shape):
-        kind = 'Slit' if shape['type'] == 'slit' else 'Hole'
-        return f"{kind} #{i}"
+    def assign_shape_ids(self, shapes):
+        """Give every shape a unique id, keeping the ones already valid.
+
+        A file may carry no ids at all (MDP always, older ECSV), or ids
+        that have been duplicated or blanked by hand editing, so anything
+        missing or already taken is renumbered rather than trusted.
+        """
+        seen = set()
+        needy = []
+        for shape in shapes:
+            ident = shape.get('id', None)
+            if ident is None or ident in seen:
+                needy.append(shape)
+                continue
+            ident = int(ident)
+            shape['id'] = ident
+            seen.add(ident)
+
+        # start above anything already in use, so a renumbered shape can
+        # never collide with one further down the list
+        self._next_shape_id = max(seen) + 1 if len(seen) > 0 else 0
+        for shape in needy:
+            shape['id'] = self._next_shape_id
+            self._next_shape_id += 1
+
+    def _shape_label(self, shape):
+        """How a shape is named in every view: on the canvas, in the
+        manager table and in the edit dialog.
+
+        NOTE: B and C are the letters the MDP format itself uses for a
+        box and a circle, so the naming matches what is in the file.
+        """
+        prefix = 'B' if shape['type'] == 'slit' else 'C'
+        return f"{prefix}{shape.get('id', '?')}"
+
+    def _shape_by_id(self, ident):
+        for shape in self.shapes:
+            if shape.get('id', None) == ident:
+                return shape
+        return None
 
     def update_slit_and_hole_info(self):
         """Refresh the manager table from the current shapes."""
@@ -906,7 +968,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         rows = []
         for i, shape in enumerate(self.shapes):
             rows.append(dict(included=not shape.get('excluded', False),
-                             id=self._shape_label(i, shape),
+                             id=self._shape_label(shape),
                              x=f"{shape['x']:.1f}",
                              y=f"{shape['y']:.1f}",
                              priority=f"{shape.get('priority', 1):.2f}",
@@ -939,10 +1001,10 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         the row dict on qt/pg and a path on the gtk backends.
         """
         if isinstance(path_or_row, dict):
-            # match on the label, which carries the index
+            # the label carries the shape's id, which survives reordering
             label = path_or_row.get('id', '')
             for i, shape in enumerate(self.shapes):
-                if self._shape_label(i, shape) == label:
+                if self._shape_label(shape) == label:
                     return i
             return None
         if isinstance(path_or_row, (list, tuple)):
@@ -1209,6 +1271,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         else:
             shape.update({'type': 'hole', 'diameter': self.default_diameter,
                           'priority': 1})
+        shape['id'] = self._next_shape_id
+        self._next_shape_id += 1
         self.shapes.append(shape)
         self.shapes_changed()
         return shape
@@ -1223,27 +1287,34 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         if not self.gui_up:
             return
         combo = self.w.edit_combo
-        if select_shape is None:
-            # keep whatever is selected now, if it still exists
+        # NOTE: track the selection by id rather than by holding on to the
+        # shape.  undo_last_edit() restores a deepcopy, so the shape objects
+        # are replaced wholesale, and two shapes at the same place compare
+        # equal -- neither identity nor equality can find it again.
+        select_id = None
+        if select_shape is not None:
+            select_id = select_shape.get('id', None)
+        else:
             idx = combo.get_index()
             if 0 <= idx < len(self._edit_shapes):
-                select_shape = self._edit_shapes[idx]
+                select_id = self._edit_shapes[idx].get('id', None)
 
         self._edit_shapes = list(self.shapes)
         self._updating_edit_list = True
         try:
             combo.clear()
-            for i, shape in enumerate(self.shapes):
-                prefix = 'B' if shape['type'] == 'slit' else 'C'
+            for shape in self.shapes:
                 comment = shape.get('comment', '')
-                label = f"{prefix}{i}: {comment}"
+                label = f"{self._shape_label(shape)}: {comment}"
                 if shape.get('excluded', False):
                     label += "  (excluded)"
                 combo.append_text(label)
 
             index = 0
-            if select_shape is not None and select_shape in self._edit_shapes:
-                index = self._edit_shapes.index(select_shape)
+            for i, shape in enumerate(self._edit_shapes):
+                if shape.get('id', None) == select_id:
+                    index = i
+                    break
             if len(self._edit_shapes) > 0:
                 combo.set_index(index)
         finally:
@@ -1493,7 +1564,7 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
         y_center = fov_center_g[1]
 
         objects = []
-        for i, shape in enumerate(self.shapes):
+        for shape in self.shapes:
             if shape.get('excluded', False) and not self.show_excluded:
                 continue
 
@@ -1528,7 +1599,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 if show_ids:
                     objects.append(self.dc.Text(xcen + wd * 0.5,
                                                 ycen + ht * 0.5 + 10,
-                                                text=f"{i}", color='white',
+                                                text=self._shape_label(shape),
+                                                color='white',
                                                 fontsize=11, rot_deg=angle))
 
                 if show_comments and comment:
@@ -1550,7 +1622,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
                 if show_ids:
                     objects.append(self.dc.Text(xcen + radius,
                                                 ycen + radius + 10,
-                                                text=f"{i}", color='yellow',
+                                                text=self._shape_label(shape),
+                                                color='yellow',
                                                 fontsize=11, rot_deg=angle))
 
                 if show_comments and comment:
@@ -1835,6 +1908,8 @@ class MOIRCS_Mask_Builder(GingaPlugin.LocalPlugin):
             for name in self.param_fields:
                 tbl.meta[f'grism_param_{name}'] = self.grism_info[name]
             tbl.meta['pa_deg'] = self.pa_deg
+            tbl.meta['prefer_sexigesimal'] = self.settings.get(
+                'prefer_sexigesimal', False)
             cut_lo, cut_hi = self.fitsimage.get_cut_levels()
             tbl.meta['cut_lo'] = cut_lo
             tbl.meta['cut_hi'] = cut_hi
